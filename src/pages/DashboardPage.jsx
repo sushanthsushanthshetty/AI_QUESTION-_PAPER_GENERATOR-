@@ -28,6 +28,7 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import Navbar from '../components/Navbar';
 import { useAuth } from '../context/AuthContext';
+import logoImg from './logo.png';
 
 // Educational quotes for immersive loader
 const ACADEMIC_QUOTES = [
@@ -68,7 +69,8 @@ export default function DashboardPage() {
   const [courseBranch, setCourseBranch] = useState('MCA');
   const [subjectCategory, setSubjectCategory] = useState('PCC');  // PCC | IPCC
   const [numParts, setNumParts] = useState(2);
-  const [questionsPerPart, setQuestionsPerPart] = useState(1);
+  const [questionsPerPart, setQuestionsPerPart] = useState(2);
+  const [coStatements, setCoStatements] = useState('');
 
   // Bloom's Taxonomy Breakdown
   const [bloom, setBloom] = useState({
@@ -209,7 +211,8 @@ export default function DashboardPage() {
         courseBranch,
         subjectCategory,
         numParts: numParts,
-        questionsPerPart: questionsPerPart
+        questionsPerPart: questionsPerPart,
+        coStatements
       };
 
       const response = await fetch('/api/generate-paper', {
@@ -253,10 +256,10 @@ export default function DashboardPage() {
       const data = await response.json();
       if (data.success) {
         fetchPapers();
-        if (currentPaper && currentPaper.id === id) {
+        if (currentPaper && (currentPaper.paperId === id || currentPaper.id === id)) {
           setCurrentPaper(null);
         }
-        if (editPaper && editPaper.id === id) {
+        if (editPaper && (editPaper.paperId === id || editPaper.id === id)) {
           setEditPaper(null);
           setPage('history');
         }
@@ -435,7 +438,7 @@ export default function DashboardPage() {
     }
   };
 
-  // Export Paper to standard A4 PDF
+  // Export Paper to standard A4 PDF (single page, auto-scaled)
   const exportPDF = async () => {
     // If we're in edit mode, switch to preview mode first
     if (paperViewMode === 'edit') {
@@ -458,22 +461,33 @@ export default function DashboardPage() {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
-        logging: false
+        logging: false,
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight
       });
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210;
-      const pageHeight = 295;
+      const pageWidth = 210;
+      const pageHeight = 297;
+      const marginLeft = 10;
+      const marginTop = 10;
+      const marginRight = 10;
+      const marginBottom = 10;
+      const usableWidth = pageWidth - marginLeft - marginRight;
+      const usableHeight = pageHeight - marginTop - marginBottom;
+      const imgWidth = usableWidth;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+      
+      // Auto-scale to fit single page if content overflows
+      if (imgHeight > usableHeight) {
+        const scale = usableHeight / imgHeight;
+        const scaledWidth = imgWidth * scale;
+        const scaledHeight = imgHeight * scale;
+        pdf.addImage(imgData, 'PNG', marginLeft + (usableWidth - scaledWidth) / 2, marginTop, scaledWidth, scaledHeight);
+      } else {
+        pdf.addImage(imgData, 'PNG', marginLeft, marginTop, imgWidth, imgHeight);
       }
       const paperTitle = editPaper || currentPaper;
       const code = paperTitle?.subjectCode || subjectCode;
@@ -574,7 +588,8 @@ export default function DashboardPage() {
         {part.questionSets?.map((qs, setIdx) => {
           const q = qs.questions?.[0];
           if (!q) return null;
-          const totalQ = (q.subParts || []).reduce((s, sp) => s + (sp.marks || 0), 0);
+          const subParts = q.subParts || [{ label: 'a)', text: '', marks: 0 }];
+          const totalQ = subParts.reduce((s, sp) => s + (sp.marks || 0), 0);
           const isLastSet = setIdx === (part.questionSets?.length || 1) - 1;
           return (
             <div key={setIdx} style={{ marginBottom: isLastSet ? 0 : '0.75rem' }}>
@@ -586,7 +601,7 @@ export default function DashboardPage() {
                   marginBottom: isLastSet ? 0 : '0.5rem'
                 }}
               >
-                {/* Question header row: number + marks + CO/BL/PO/PI */}
+                {/* Question header row: number */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--primary-navy)' }}>
                     Q{partIdx * 2 + setIdx + 1}
@@ -596,54 +611,15 @@ export default function DashboardPage() {
                       <label style={{ fontSize: '0.6rem' }}>Total</label>
                       <span style={{ fontWeight: 700, fontSize: '0.9rem' }}>{totalQ} m</span>
                     </div>
-                    <div className="form-group" style={{ margin: 0, width: '70px' }}>
-                      <label style={{ fontSize: '0.6rem' }}>CO</label>
-                      <select
-                        value={q.co || `CO${partNo}`}
-                        onChange={(e) => _updateQuestionMeta(partIdx, setIdx, 0, 'co', e.target.value)}
-                        style={{ padding: '2px 4px', fontSize: '0.8rem' }}
-                      >
-                        {['CO1', 'CO2', 'CO3', 'CO4'].map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ margin: 0, width: '70px' }}>
-                      <label style={{ fontSize: '0.6rem' }}>BL</label>
-                      <select
-                        value={q.bl || 'L2'}
-                        onChange={(e) => _updateQuestionMeta(partIdx, setIdx, 0, 'bl', e.target.value)}
-                        style={{ padding: '2px 4px', fontSize: '0.8rem' }}
-                      >
-                        {['L1', 'L2', 'L3', 'L4', 'L5', 'L6'].map(l => <option key={l} value={l}>{l}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ margin: 0, width: '70px' }}>
-                      <label style={{ fontSize: '0.6rem' }}>PO</label>
-                      <select
-                        value={q.po || 'PO1'}
-                        onChange={(e) => _updateQuestionMeta(partIdx, setIdx, 0, 'po', e.target.value)}
-                        style={{ padding: '2px 4px', fontSize: '0.8rem' }}
-                      >
-                        {['PO1', 'PO2', 'PO3', 'PO4'].map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </div>
-                    <div className="form-group" style={{ margin: 0, width: '80px' }}>
-                      <label style={{ fontSize: '0.6rem' }}>PI</label>
-                      <input
-                        type="text"
-                        value={q.pi || ''}
-                        onChange={(e) => _updateQuestionMeta(partIdx, setIdx, 0, 'pi', e.target.value)}
-                        placeholder="1.7.1"
-                        style={{ padding: '2px 4px', fontSize: '0.8rem', width: '80px' }}
-                      />
-                    </div>
                   </div>
                 </div>
-                {/* Sub-parts */}
-                {(q.subParts || []).map((sp, spIdx) => (
+                {/* Sub-parts with per-row CO/BL/PO/PI */}
+                {subParts.map((sp, spIdx) => (
                   <div key={spIdx} style={{
                     display: 'flex', gap: '0.5rem', alignItems: 'flex-start',
                     paddingTop: spIdx > 0 ? '0.5rem' : 0,
-                    borderTop: spIdx > 0 ? '1px dashed var(--border-color)' : 'none'
+                    borderTop: spIdx > 0 ? '1px dashed var(--border-color)' : 'none',
+                    flexWrap: 'wrap'
                   }}>
                     <span style={{
                       fontWeight: 700, color: 'var(--primary-navy)', minWidth: '30px',
@@ -655,18 +631,64 @@ export default function DashboardPage() {
                       rows={2}
                       value={sp.text || ''}
                       onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'text', e.target.value)}
-                      style={{ flex: 1, fontSize: '0.9rem', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: '#fff' }}
+                      style={{ flex: '1 1 250px', fontSize: '0.9rem', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', background: '#fff' }}
                       placeholder="Enter sub-question text…"
                     />
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
-                      <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>mks</label>
-                      <input
-                        type="number"
-                        value={sp.marks || 0}
-                        min={0}
-                        onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'marks', e.target.value)}
-                        style={{ width: '48px', textAlign: 'center', padding: '3px', borderRadius: '4px', border: '1px solid var(--border-color)' }}
-                      />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                        <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>mks</label>
+                        <input
+                          type="number"
+                          value={sp.marks || 0}
+                          min={0}
+                          onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'marks', e.target.value)}
+                          style={{ width: '48px', textAlign: 'center', padding: '3px', borderRadius: '4px', border: '1px solid var(--border-color)' }}
+                        />
+                      </div>
+                      {/* Per-sub-part CO */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                        <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>CO</label>
+                        <select
+                          value={sp.co || q.co || `CO${partNo}`}
+                          onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'co', e.target.value)}
+                          style={{ padding: '3px 4px', fontSize: '0.75rem', width: '54px' }}
+                        >
+                          {['CO1', 'CO2', 'CO3', 'CO4'].map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                      {/* Per-sub-part BL */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                        <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>BL</label>
+                        <select
+                          value={sp.bl || q.bl || 'L2'}
+                          onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'bl', e.target.value)}
+                          style={{ padding: '3px 4px', fontSize: '0.75rem', width: '54px' }}
+                        >
+                          {['L1', 'L2', 'L3', 'L4', 'L5', 'L6'].map(l => <option key={l} value={l}>{l}</option>)}
+                        </select>
+                      </div>
+                      {/* Per-sub-part PO */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                        <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>PO</label>
+                        <select
+                          value={sp.po || q.po || 'PO1'}
+                          onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'po', e.target.value)}
+                          style={{ padding: '3px 4px', fontSize: '0.75rem', width: '54px' }}
+                        >
+                          {['PO1', 'PO2', 'PO3', 'PO4'].map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                      </div>
+                      {/* Per-sub-part PI */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                        <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>PI</label>
+                        <input
+                          type="text"
+                          value={sp.pi || q.pi || ''}
+                          onChange={(e) => _updateSubPart(partIdx, setIdx, 0, spIdx, 'pi', e.target.value)}
+                          placeholder="1.7.1"
+                          style={{ padding: '3px 4px', fontSize: '0.75rem', width: '60px' }}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -850,8 +872,8 @@ return (
                   <div className="form-group">
                     <label>Test Number</label>
                     <select value={editPaper.testNo ? String(editPaper.testNo).replace('TEST PAPER - ', '') : 'I'} onChange={(e) => updatePaperMeta('testNo', `TEST PAPER - ${e.target.value}`)}>
-                      <option value="TEST PAPER - I">I</option>
-                      <option value="TEST PAPER - II">II</option>
+                      <option value="I">I</option>
+                      <option value="II">II</option>
                     </select>
                   </div>
                   <div className="form-group">
@@ -862,6 +884,17 @@ return (
                     <label>Duration (min)</label>
                     <input type="number" value={editPaper.duration || ''} onChange={(e) => updatePaperMeta('duration', parseInt(e.target.value) || 0)} />
                   </div>
+                </div>
+                {/* CO Statements editor */}
+                <div className="form-group" style={{ marginTop: '1rem' }}>
+                  <label>CO Statements (for footer)</label>
+                  <textarea
+                    rows={3}
+                    value={editPaper.coStatementsRaw || ''}
+                    onChange={(e) => updatePaperMeta('coStatementsRaw', e.target.value)}
+                    placeholder="Enter CO descriptions, one per line, e.g.:&#10;CO1: Describe the elements of OS&#10;CO2: Analyze process management..."
+                    style={{ fontSize: '0.85rem' }}
+                  />
                 </div>
               </div>
 
@@ -925,68 +958,8 @@ return (
                 <div className="glass-card" style={{ padding: '2.5rem 1.5rem', textAlign: 'center' }}>
                   <div className="paper-container" style={{ margin: '0 auto' }}>
                     <div className="printable-paper" id="paper-preview">
-                      <div className="paper-header">
-                        <h2 className="paper-univ-title">SIR M. VISVESVARAYA INSTITUTE OF TECHNOLOGY</h2>
-                        <h3 className="paper-test-title">DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING</h3>
-                        <div style={{ fontWeight: 700, fontSize: '1.05rem', margin: '0.25rem 0' }}>
-                          {(editPaper.testNo || '').toUpperCase()} — MAY 2026
-                        </div>
-                        <div className="paper-meta-grid">
-                          <div className="paper-meta-item"><strong>Course Name:</strong> {editPaper.subject}</div>
-                          <div className="paper-meta-item"><strong>Course Code:</strong> {editPaper.subjectCode}</div>
-                          <div className="paper-meta-item"><strong>Semester / Branch:</strong> Semester {editPaper.semester} / CSE</div>
-                          <div className="paper-meta-item" style={{ display: 'flex', gap: '2rem' }}>
-                            <span><strong>Duration:</strong> {editPaper.duration} Min</span>
-                            <span><strong>Max Marks:</strong> {editPaper.maxMarks}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="paper-instructions">
-                        <h4>General Instructions:</h4>
-                        <ol style={{ paddingLeft: '1.25rem', fontSize: '0.85rem' }}>
-                          <li>Answer all sections completely. All questions in a section carry equal weight.</li>
-                          <li>Write legibly and represent answers with diagrams or flowcharts wherever appropriate.</li>
-                          <li>Use of programmable calculators or communication equipment is strictly prohibited.</li>
-                        </ol>
-                      </div>
-                      {editPaper.sections && editPaper.sections.map((sec, secIdx) => (
-                        <div className="paper-section" key={secIdx}>
-                          <h3 className="paper-section-title">
-                            {sec.sectionTitle} ({sec.questions?.length || 0} x {sec.marksPerQuestion} = {(sec.questions?.length || 0) * (sec.marksPerQuestion || 0)} Marks)
-                          </h3>
-                          {sec.questions && sec.questions.map((q, qIdx) => (
-                            <div className="paper-question-wrapper" key={qIdx}>
-                              <div className="question-text-row">
-                                <span className="question-num">{qIdx + 1}.</span>
-                                <span className="question-text">{q.text}</span>
-                                <span className="question-marks">[{q.marks}]</span>
-                              </div>
-                              {q.options && q.options.length > 0 && q.options.some(o => o) && (
-                                <div className="question-options-grid">
-                                  {q.options.map((opt, oIdx) => (
-                                    opt ? (
-                                      <div className="option-item" key={oIdx}>
-                                        <span className="option-letter">({String.fromCharCode(65 + oIdx)})</span>
-                                        <span>{opt}</span>
-                                      </div>
-                                    ) : null
-                                  ))}
-                                </div>
-                              )}
-                              <div className="question-meta-tags">
-                                <span>CO: CO{secIdx + 1}</span>
-                                <span>Level: {q.cognitiveLevel}</span>
-                                {q.correctAnswer && <span style={{ color: 'var(--accent-gold)' }}>Ans: {q.correctAnswer}</span>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      <div style={{ marginTop: 'auto', paddingTop: '3rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem' }}>
-                        <div style={{ textDecoration: 'overline', fontWeight: 600 }}>Course Coordinator</div>
-                        <div style={{ textDecoration: 'overline', fontWeight: 600 }}>Module Coordinator</div>
-                        <div style={{ textDecoration: 'overline', fontWeight: 600 }}>Head of Department</div>
-                      </div>
+                      {/* MVIT PAPER PREVIEW */}
+                      <MVITPaperPreview paper={editPaper} />
                     </div>
                   </div>
                 </div>
@@ -1021,8 +994,11 @@ return (
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Evaluation Cycle</label>
-                  <input type="text" value={testNo} onChange={(e) => setTestNo(e.target.value)} placeholder="e.g. Internal Assessment I" />
+                  <label>Test Number</label>
+                  <select value={testNo} onChange={(e) => setTestNo(e.target.value)}>
+                    <option value="I">Test Paper - I</option>
+                    <option value="II">Test Paper - II</option>
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Maximum Marks</label>
@@ -1032,10 +1008,44 @@ return (
                   <label>Duration (Minutes)</label>
                   <input type="number" value={duration} onChange={(e) => setDuration(parseInt(e.target.value) || 0)} />
                 </div>
+                {/* MVIT-specific fields */}
+                <div className="form-group">
+                  <label>Faculty Name</label>
+                  <input type="text" value={facultyName} onChange={(e) => setFacultyName(e.target.value)} placeholder="e.g. Dr. Ramesh Kumar" />
+                </div>
+                <div className="form-group">
+                  <label>Course / Branch</label>
+                  <input type="text" value={courseBranch} onChange={(e) => setCourseBranch(e.target.value)} placeholder="e.g. MCA" />
+                </div>
+                <div className="form-group">
+                  <label>Subject Category</label>
+                  <select value={subjectCategory} onChange={(e) => setSubjectCategory(e.target.value)}>
+                    <option value="PCC">PCC</option>
+                    <option value="IPCC">IPCC</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Number of Parts</label>
+                  <input type="number" value={numParts} min={1} max={4} onChange={(e) => setNumParts(parseInt(e.target.value) || 2)} />
+                </div>
+                <div className="form-group">
+                  <label>Questions per Part (OR sets)</label>
+                  <input type="number" value={questionsPerPart} min={1} max={3} onChange={(e) => setQuestionsPerPart(parseInt(e.target.value) || 2)} />
+                </div>
               </div>
               <div className="form-group full-width" style={{ marginTop: '1.25rem' }}>
                 <label>Syllabus Content / Topics Blueprint</label>
                 <textarea rows={4} value={syllabus} onChange={(e) => setSyllabus(e.target.value)} placeholder="Enter course modules, concepts or copy syllabus texts here to train the AI on specific topics..." />
+              </div>
+              <div className="form-group full-width" style={{ marginTop: '0.75rem' }}>
+                <label>CO Statements (optional, for footer)</label>
+                <textarea
+                  rows={3}
+                  value={coStatements}
+                  onChange={(e) => setCoStatements(e.target.value)}
+                  placeholder="Enter CO descriptions, one per line, e.g.:&#10;CO1: Describe the elements and various functionalities of the operating system.&#10;CO2: Analyze process management and scheduling algorithms..."
+                  style={{ fontSize: '0.85rem' }}
+                />
               </div>
             </div>
           </div>
@@ -1122,7 +1132,7 @@ return (
             ) : (
               <div className="history-list">
                 {savedPapers.map((paper) => (
-                  <div className="history-item" key={paper.id}>
+                  <div className="history-item" key={paper.paperId || paper.id}>
                     <div className="history-info">
                       <h4>{paper.subject || 'Syllabus Paper'} {paper.subjectCode ? `(${paper.subjectCode})` : ''}</h4>
                       <p>
@@ -1142,7 +1152,7 @@ return (
                         <Eye size={14} />
                         <span>Preview</span>
                       </button>
-                      <button className="btn btn-danger" onClick={() => deletePaper(paper.id)} style={{ padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <button className="btn btn-danger" onClick={() => deletePaper(paper.paperId || paper.id)} style={{ padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -1194,25 +1204,19 @@ return (
         </div>
       )}
     </div>
-
-    {/* Hidden MVIT Preview for PDF export */}
-    <div style={{ display: 'none' }}>
-      {currentPaper && <MVITPaperPreview paper={currentPaper} />}
-    </div>
   </div>
 );
 }
 
 // ─── MVIT Preview Renderer ──────────────────────────────────────
-const todayDate = new Date().toLocaleDateString('en-IN', {day: '2-digit', month: 'short', year: 'numeric' });
 
 const colHdrStyle = {
   background:'#1a3560', color:'#fff',
-  fontWeight:700, padding:'3px 4px', fontSize:'8.5pt',
+  fontWeight:700, padding:'6px 8px', fontSize:'8pt',
   border:'1px solid #000', textAlign:'center', whiteSpace:'nowrap'
 };
 const cellStyle = {
-  border:'1px solid #000', padding:'3px 4px', fontSize:'8.5pt',
+  border:'1px solid #000', padding:'6px 8px', fontSize:'8pt',
   verticalAlign:'top', textAlign:'center'
 };
 const cellQ = {...cellStyle, textAlign:'left', verticalAlign:'top' };
@@ -1221,148 +1225,183 @@ const MVITPaperPreview = ({paper: p }) => {
   const br   = p.courseBranch    || 'MCA';
   const sc   = p.subjectCode    || '';
   const sg   = p.subjectCategory || 'PCC';
-  const codeBoxes = sc ? `
-  <span style="display: inline-block; width: 22px; height: 20px; border: 1.5px solid #000; text-align: center; line-height: 20px; font-size: 10pt; margin: 0 1px;">${sc[0] || ''}</span>
-  <span style="display: inline-block; width: 22px; height: 20px; border: 1.5px solid #000; text-align: center; line-height: 20px; font-size: 10pt; margin: 0 1px;">${sc[1] || ''}</span>
-  <span style="display: inline-block; width: 22px; height: 20px; border: 1.5px solid #000; text-align: center; line-height: 20px; font-size: 10pt; margin: 0 1px;">${sc[2] || ''}</span>
-  <span style="display: inline-block; width: 22px; height: 20px; border: 1.5px solid #000; text-align: center; line-height: 20px; font-size: 10pt; margin: 0 1px;">${sc[3] || ''}</span>` : '';
+  const today = new Date();
+  const day = String(today.getDate()).padStart(2, '0');
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const year = today.getFullYear();
+
+  // Build subject code box
+  const codeBoxStyle = () => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '18px',
+    border: '1.2px solid #000',
+    fontSize: '8pt',
+    fontWeight: 700,
+    margin: '0 1px',
+    fontFamily: 'monospace',
+    boxSizing: 'border-box',
+    verticalAlign: 'middle',
+  });
+
+  // Build date box
+  const dateBoxStyle = () => ({
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '20px',
+    height: '18px',
+    border: '1.2px solid #000',
+    fontSize: '8pt',
+    fontWeight: 700,
+    margin: '0 1px',
+    fontFamily: 'monospace',
+    boxSizing: 'border-box',
+    verticalAlign: 'middle',
+  });
+
+  // Parse CO statements
+  const coStatementsArr = [];
+  if (p.coStatements && Array.isArray(p.coStatements)) {
+    p.coStatements.forEach(cs => coStatementsArr.push(cs));
+  } else if (p.coStatementsRaw) {
+    p.coStatementsRaw.split('\n').forEach(line => {
+      const match = line.match(/^(CO\d+)[:\s]+(.+)/i);
+      if (match) coStatementsArr.push({ co: match[1].toUpperCase(), description: match[2] });
+    });
+  }
+  // Also collect COs from parts
+  const usedCOs = new Set();
+  (p.parts || []).forEach(part => {
+    (part.questionSets || []).forEach(qs => {
+      (qs.questions || []).forEach(q => {
+        (q.subParts || []).forEach(sp => {
+          if (sp.co) usedCOs.add(sp.co);
+        });
+        if (q.co && !q.subParts?.some(sp => sp.co)) usedCOs.add(q.co);
+      });
+    });
+  });
+
+  // Generate USN boxes (11 boxes: 1|M|V + 8 empty)
+  const usnBoxes = [];
+  usnBoxes.push(<span key="usn-label" style={{fontWeight:700, fontSize:'9pt', marginRight:'3px', fontFamily:'monospace'}}>USN</span>);
+  // First three: 1 | M | V
+  usnBoxes.push(<span key="usn-1" style={dateBoxStyle()}>1</span>);
+  usnBoxes.push(<span key="usn-m" style={dateBoxStyle()}>M</span>);
+  usnBoxes.push(<span key="usn-v" style={dateBoxStyle()}>V</span>);
+  // Remaining 8 empty boxes
+  for (let i = 0; i < 8; i++) {
+    usnBoxes.push(<span key={`usn-${i+4}`} style={dateBoxStyle()}>{''}</span>);
+  }
 
   return (
-    <div style={{ padding: '8mm 6mm 6mm 6mm', width: '100%', boxSizing: 'border-box' }}>
+    <div className="paper-a4-page" style={{ padding: '10mm 15mm 10mm 15mm', width: '210mm', minHeight: '297mm', boxSizing: 'border-box', fontFamily: 'Times New Roman, serif', color:'#000', fontSize: '9pt', lineHeight: '1.5' }}>
 
-      {/* ── ❶ HEADER ─────────────────────────────────────────── */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '4px' }}>
-        <colgroup>
-          <col style={{ width: '35%' }} />
-          <col style={{ width: '30%', textAlign: 'center', verticalAlign: 'middle' }} />
-          <col style={{ width: '35%', textAlign: 'right' }} />
-        </colgroup>
+      {/* ── ROW 1: Date boxes (left) | Subject Code (right) ── */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1px' }}>
         <tr>
-          <td style={{ fontSize: '12pt', fontWeight: 700, color: '#c0392b' }}>{todayDate}</td>
-          <td style={{
-            textAlign: 'center', fontSize: '10pt', fontWeight: 700, color: '#888',
-            fontStyle: 'italic', verticalAlign: 'middle'
-          }}>
-            (For faculty use only)
+          <td style={{ textAlign:'left', verticalAlign:'middle', width:'50%' }}>
+            <div style={{fontSize:'7pt', fontWeight:700, fontFamily:'Arial,sans-serif', marginBottom:'1px', color:'#000'}}>Date:</div>
+            <span style={dateBoxStyle(day[0])}>{day[0]}</span>
+            <span style={dateBoxStyle(day[1])}>{day[1]}</span>
+            <span style={{fontSize:'10pt', fontWeight:700, margin:'0 2px', fontFamily:'monospace'}}>|</span>
+            <span style={dateBoxStyle(month[0])}>{month[0]}</span>
+            <span style={dateBoxStyle(month[1])}>{month[1]}</span>
+            <span style={{fontSize:'10pt', fontWeight:700, margin:'0 2px', fontFamily:'monospace'}}>|</span>
+            {String(year).split('').map((d, i) => (
+              <span key={i} style={dateBoxStyle(d)}>{d}</span>
+            ))}
           </td>
-          <td style={{ textAlign: 'right', fontSize: '10pt', fontWeight: 700 }} dangerouslySetInnerHTML={{ __html: sc + codeBoxes }}>
+          <td style={{ textAlign:'right', verticalAlign:'middle', width:'50%' }}>
+            <div style={{fontSize:'7pt', fontWeight:700, fontFamily:'Arial,sans-serif', marginBottom:'1px', color:'#000'}}>Subject Code:</div>
+            {sc.split('').map((ch, i) => (
+              <span key={i} style={codeBoxStyle(ch)}>{ch}</span>
+            ))}
           </td>
         </tr>
       </table>
 
-      {/* Logo + USN strip */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '3px' }}>
-        <colgroup>
-          <col style={{ width: '80px' }} />
-          <col style={{ width: '1px' }} />
-          <col style={{ width: '2px' }} />
-          <col />
-        </colgroup>
+      {/* ── ROW 2: Logo + "1|M|V" + USN boxes ── */}
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1px' }}>
         <tr>
-          <td style={{ width: '70px', height: '38px', border: '1.5px solid #000', background: '#f8f8f8', textAlign: 'center', fontSize: '6pt', color: '#888', padding: '2px', verticalAlign: 'middle' }}>
-            (SVIT Logo)
+          <td style={{ width:'60px', height:'36px', border:'1.5px solid #000', textAlign:'center', verticalAlign:'middle', padding:'2px', fontSize:'6pt', color:'#999', background:'#fafafa' }}>
+            <img src={logoImg} alt="SVIT Logo" style={{ width:'56px', height:'32px', objectFit:'contain' }} />
           </td>
-          <td style={{
-            border: '1.5px solid #000', borderLeft: 'none', background: '#f8f8f8',
-            textAlign: 'center', fontSize: '8pt', padding: '3px 2px'
-          }}>
-            <span style={{ fontSize: '10pt', fontWeight: 700 }}>1</span> |
-            <span style={{ fontSize: '10pt', fontWeight: 700, margin: '0 2px' }}>M</span> |
-            <span style={{ fontSize: '10pt', fontWeight: 700 }}>V</span>
-          </td>
-          <td style={{ width: '4px', border: '1.5px solid #000', borderLeft: 'none' }}></td>
-          <td style={{ border: '1.5px solid #000', borderLeft: 'none', padding: '0', height: '38px' }}>
-            <table style={{ width: '100%', height: '100%', borderCollapse: 'collapse', padding: '3px' }}>
-              <tr style={{ height: '50%' }}>
-                <td style={{
-                  fontFamily: 'monospace', fontSize: '13pt', letterSpacing: '1px',
-                  borderBottom: '1px solid #aaa', padding: '2px 4px', color: '#555'
-                }}>
-                  USN: <span style={{ display: 'inline-block', width: '3px', borderTop: '2px solid #000' }}></span>
-                  <span style={{ display: 'inline-block', width: '3px', borderTop: '2px solid #000' }}></span>
-                  <span style={{ display: 'inline-block', width: '3px', borderTop: '2px solid #000' }}></span>
-                </td>
-              </tr>
-              <tr style={{ height: '50%' }}>
-                <td style={{ fontSize: '8pt', color: '#888', padding: '2px 4px' }}>
-                  Subject Category: {sg} | Class &amp; Year
-                </td>
-              </tr>
-            </table>
+          <td style={{ border:'1.5px solid #000', borderLeft:'none', padding:'2px 6px', textAlign:'left' }}>
+            {usnBoxes}
           </td>
         </tr>
       </table>
 
-      {/* College Name */}
-      <h2 style={{
-        margin: '0 0 2px 0', fontSize: '11pt', fontWeight: 700, textAlign: 'center',
-        fontFamily: 'Times New Roman, serif', letterSpacing: '0.5px', lineHeight: '1.3'
-      }}>
-        Sir M. Visvesvaraya Institute of Technology, Bengaluru-562 157<br />
-        <span style={{ fontSize: '9pt', fontWeight: 400, fontFamily: 'Arial, sans-serif' }}>
-          (Affiliated to VTU, Approved by AICTE, Accredited by NAAC)
-        </span>
-      </h2>
+      {/* ── ROW 3: College Name + Test Title ── */}
+      <div style={{ textAlign:'center', margin:'6px 0 3px 0' }}>
+        <div style={{fontSize:'12pt', fontWeight:700, fontFamily:'Times New Roman, serif', letterSpacing:'0.5px', lineHeight:'1.5'}}>
+          Sir M. Visvesvaraya Institute of Technology
+        </div>
+        <div style={{fontSize:'8pt', fontFamily:'Arial,sans-serif', color:'#555', lineHeight:'1.5'}}>
+          Bengaluru-562 157
+        </div>
+        <div style={{fontSize:'11pt', fontWeight:800, fontFamily:'Times New Roman, serif', letterSpacing:'2px', margin:'4px 0 0 0', borderTop:'1.5px solid #000', borderBottom:'1.5px solid #000', padding:'3px 0', display:'inline-block', width:'100%'}}>
+          {(p.testNo || 'TEST PAPER - I').toUpperCase()}
+        </div>
+      </div>
 
-      {/* ── ❷ TITLE LINE ───────────────────────────────────────── */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '4px 0' }}>
+      {/* ── INFO TABLE: Colon format ── */}
+      <table
+        style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          margin: '4px 0',
+          fontSize: '7.5pt',
+          border: '1px solid #000',
+        }}
+      >
         <tr>
-          <td style={{
-            borderTop: '1.5px solid #000', borderBottom: '1.5px solid #000',
-            padding: '4px 8px', fontSize: '12pt', fontWeight: 800,
-            textAlign: 'center', fontFamily: 'Times New Roman, serif', letterSpacing: '2px'
-          }}>
-            {(p.testNo || 'TEST PAPER - I').toUpperCase()}
-          </td>
-        </tr>
-      </table>
-
-      {/* ── ❸ INFO GRID (2-column) ─────────────────────────────── */}
-      <table style={{ width: '100%', borderCollapse: 'collapse', margin: '4px 0' }}>
-        <colgroup>
-          <col style={{ width: '52%' }} />
-          <col style={{ width: '48%' }} />
-        </colgroup>
-        <tr>
-          <td style={{ border: '1px solid #000', verticalAlign: 'top' }}>
+          <td
+            style={{
+              width: '50%',
+              verticalAlign: 'top',
+              padding: '3px',
+              borderRight: '1px solid #000',
+            }}
+          >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               {[
                 ['TEST NO', String(p.testNo || 'I').replace('TEST PAPER - ', '')],
                 ['COURSE/BRANCH', br],
                 ['SUBJECT', p.subject || ''],
+                ['SUBJECT CATEGORY(IPCC/PCC)', sg],
               ].map(([lbl, val]) => (
                 <tr key={lbl}>
-                  <td style={{
-                    fontWeight: 700, background: '#f5f5f5', border: '1px solid #000',
-                    borderTop: 'none', borderLeft: 'none',
-                    padding: '2px 6px', fontSize: '8.5pt', width: '38%'
-                  }}>{lbl}</td>
-                  <td style={{
-                    border: '1px solid #000', borderTop: 'none',
-                    padding: '2px 6px', fontSize: '8.5pt', fontWeight: 600
-                  }}>{val}</td>
+                  <td style={{ fontWeight: 700, padding: '4px 3px', width: '42%', whiteSpace: 'nowrap' }}>{lbl}</td>
+                  <td style={{ width: '5%' }}>:</td>
+                  <td style={{ fontWeight: 600, padding: '4px 3px' }}>{val}</td>
                 </tr>
               ))}
             </table>
           </td>
-          <td style={{ border: '1px solid #000', verticalAlign: 'top' }}>
+
+          <td
+            style={{
+              width: '50%',
+              verticalAlign: 'top',
+              padding: '3px',
+            }}
+          >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               {[
-                ['SEMESTER', p.semester ? `Semester ${p.semester}` : '—'],
+                ['SEMESTER', p.semester ? `${p.semester}` : '—'],
                 ['MAX. MARKS', p.maxMarks || 25],
                 ['DURATION', `${p.duration || 60} minutes`],
                 ['FACULTY NAME', p.facultyName || 'To be filled'],
               ].map(([lbl, val]) => (
                 <tr key={lbl}>
-                  <td style={{
-                    fontWeight: 700, background: '#f5f5f5', border: '1px solid #000',
-                    borderTop: 'none', borderRight: 'none',
-                    padding: '2px 6px', fontSize: '8.5pt', width: '38%'
-                  }}>{lbl}</td>
-                  <td style={{
-                    border: '1px solid #000', borderTop: 'none', borderRight: 'none',
-                    padding: '2px 6px', fontSize: '8.5pt', fontWeight: 600
-                  }}>{val}</td>
+                  <td style={{ fontWeight: 700, padding: '4px 3px', width: '40%', whiteSpace: 'nowrap' }}>{lbl}</td>
+                  <td style={{ width: '5%' }}>:</td>
+                  <td style={{ fontWeight: 600, padding: '4px 3px' }}>{val}</td>
                 </tr>
               ))}
             </table>
@@ -1373,15 +1412,15 @@ const MVITPaperPreview = ({paper: p }) => {
       {/* ── ❹ INSTRUCTIONS ─────────────────────────────────────── */}
       <div style={{
         borderTop: '1.5px solid #000', borderBottom: '1.5px solid #000',
-        padding: '4px 8px', margin: '4px 0',
-        fontSize: '8.5pt', fontWeight: 700, fontFamily: 'Times New Roman, serif'
+        padding: '3px 6px', margin: '3px 0',
+        fontSize: '8pt', fontWeight: 700, fontFamily: 'Times New Roman, serif'
       }}>
         Instructions: Answer any one Question from each Part
       </div>
 
       {/* ── ❺ BLOOM'S TAXONOMY NOTE ────────────────────────────── */}
       <div style={{
-        fontSize: '7.5pt', lineHeight: '1.4', margin: '3px 0',
+        fontSize: '6.5pt', lineHeight: '1.5', margin: '2px 0',
         fontFamily: 'Arial, sans-serif', color: '#222'
       }}>
         <span style={{ fontWeight: 700, textDecoration: 'underline' }}>BL</span> – Bloom's Taxonomy Levels (
@@ -1391,23 +1430,23 @@ const MVITPaperPreview = ({paper: p }) => {
         <span style={{ fontWeight: 700, textDecoration: 'underline' }}>PI</span> – Performance Indicator
       </div>
 
-      {/* ── ❻ QUESTION TABLE ────────────────────────────────────── */}
+      {/* ── ❻ QUESTION TABLE (Correct column order: Q.No. | Question | Marks | CO | BL | PO | PI) ── */}
       {(p.parts || []).map((part, partIdx) => {
         const letter = ['A', 'B', 'C', 'D'][partIdx] || String.fromCharCode(65 + partIdx);
         const isLast = partIdx === (p.parts?.length || 1) - 1;
 
         return (
-          <div key={partIdx} style={{ marginBottom: isLast ? '6px' : '10px' }}>
+          <div key={partIdx} style={{ marginBottom: isLast ? '4px' : '12px', pageBreakInside: 'avoid' }}>
             {/* Part Heading */}
             <div style={{
               background: '#1a3560', color: '#fff',
-              fontWeight: 800, padding: '3px 6px', fontSize: '9.5pt',
+              fontWeight: 800, padding: '2px 5px', fontSize: '8.5pt',
               fontFamily: 'Arial, sans-serif', letterSpacing: '1px'
             }}>
               {part.partTitle || `PART ${letter}`}
             </div>
 
-            {/* First question-set row (Set 1) */}
+            {/* Question sets */}
             {part.questionSets?.map((qs, setIdx) => {
               const q = qs.questions?.[0];
               if (!q) return null;
@@ -1419,69 +1458,52 @@ const MVITPaperPreview = ({paper: p }) => {
                   <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 0 }}>
                     <colgroup>
                       <col style={{ width: '6%' }} />     {/* Q.No */}
-                      <col style={{ width: '6%' }} />     {/* Label/Marks */}
+                      <col />                             {/* Question */}
                       <col style={{ width: '6%' }} />     {/* Marks */}
-                      <col style={{ width: '6%' }} />     {/* CO */}
-                      <col style={{ width: '6%' }} />     {/* BL */}
-                      <col style={{ width: '6%' }} />     {/* PO */}
-                      <col style={{ width: '6%' }} />     {/* PI */}
-                      <col />                             {/* Question text */}
+                      <col style={{ width: '5%' }} />     {/* CO */}
+                      <col style={{ width: '5%' }} />     {/* BL */}
+                      <col style={{ width: '5%' }} />     {/* PO */}
+                      <col style={{ width: '7%' }} />     {/* PI */}
                     </colgroup>
                     {/* Header row */}
                     <tr>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>Q.No</th>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>Sub</th>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>Marks</th>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>CO</th>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>BL</th>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>PO</th>
-                      <th style={{ ...colHdrStyle, width: '6%' }}>PI</th>
-                      <th style={{ ...colHdrStyle }}>Question</th>
+                      <th style={colHdrStyle}>Q.No</th>
+                      <th style={colHdrStyle}>Question</th>
+                      <th style={colHdrStyle}>Marks</th>
+                      <th style={colHdrStyle}>CO</th>
+                      <th style={colHdrStyle}>BL</th>
+                      <th style={colHdrStyle}>PO</th>
+                      <th style={colHdrStyle}>PI</th>
                     </tr>
                     {/* Data rows for sub-parts */}
                     {subParts.map((sp, spIdx) => {
                       const isFirstSub = spIdx === 0;
-                      const isSecondSub = !isFirstSub;
+                      const isLastSub = spIdx === subParts.length - 1;
                       return (
-                        <tr key={spIdx}>
-                          {/* Q.No cell — merge first sub(rowspan=2) or blank */}
+                        <tr key={spIdx} style={{ pageBreakInside: 'avoid' }}>
                           {isFirstSub ? (
-                            <td rowSpan={subParts.length} style={{ ...cellStyle, fontWeight: 800, fontSize: '9.5pt', verticalAlign: 'middle', textAlign: 'center' }}>
+                            <td rowSpan={subParts.length} style={{ ...cellStyle, fontWeight: 800, fontSize: '8pt', verticalAlign: 'middle', textAlign: 'center' }}>
                               {q.qNo || (partIdx * 2 + setIdx + 1)}
                             </td>
                           ) : null}
-                          {/* Sub-part label */}
-                          <td style={{ ...cellStyle, fontWeight: 600, background: '#eef2fb', textAlign: 'left', textIndent: '10px' }}>
-                            {sp.label}
+                          <td style={{ ...cellQ, paddingLeft: '8px', paddingBottom: !isLastSub ? '6px' : undefined }}>
+                            <span style={{ fontWeight: 600 }}>{sp.label}</span> {sp.text || ''}
                           </td>
                           <td style={{ ...cellStyle, fontWeight: 700, textAlign: 'center' }}>{sp.marks || ''}</td>
-                          {/* CO/BL/PO/PI show in header of first sub-part only */}
-                          <td style={{
-                            ...cellStyle, color: '#666', backgroundColor: isFirstSub ? '#fff' : 'transparent',
-                            borderTop: isSecondSub ? 'none' : undefined
-                          }}>{isFirstSub ? (q.co || '') : ''}</td>
-                          <td style={{
-                            ...cellStyle, color: '#666', backgroundColor: isFirstSub ? '#fff' : 'transparent',
-                            borderTop: isSecondSub ? 'none' : undefined
-                          }}>{isFirstSub ? (q.bl || '') : ''}</td>
-                          <td style={{
-                            ...cellStyle, color: '#666', backgroundColor: isFirstSub ? '#fff' : 'transparent',
-                            borderTop: isSecondSub ? 'none' : undefined
-                          }}>{isFirstSub ? (q.po || '') : ''}</td>
-                          <td style={{
-                            ...cellStyle, color: '#666', backgroundColor: isFirstSub ? '#fff' : 'transparent',
-                            borderTop: isSecondSub ? 'none' : undefined
-                          }}>{isFirstSub ? (q.pi || '') : ''}</td>
-                          <td style={{ ...cellQ, paddingLeft: '6px' }}>{sp.text || ''}</td>
+                          <td style={{ ...cellStyle }}>{sp.co || q.co || ''}</td>
+                          <td style={{ ...cellStyle }}>{sp.bl || q.bl || ''}</td>
+                          <td style={{ ...cellStyle }}>{sp.po || q.po || ''}</td>
+                          <td style={{ ...cellStyle }}>{sp.pi || q.pi || ''}</td>
                         </tr>
                       );
                     })}
                   </table>
-                  {/* OR separator between sets */}
+                  {/* OR separator */}
                   {!isLastInPart && (
                     <div style={{
-                      textAlign: 'center', fontWeight: 800, fontSize: '10pt',
-                      color: '#000', padding: '1px 0', letterSpacing: '3px'
+                      textAlign: 'center', fontWeight: 700, fontSize: '8pt',
+                      color: '#000', padding: '0', letterSpacing: '2px',
+                      margin: '8px 0'
                     }}>
                       ─── OR ───
                     </div>
@@ -1494,43 +1516,55 @@ const MVITPaperPreview = ({paper: p }) => {
       })}
 
       {/* ── ❼ CO STATEMENTS FOOTER ──────────────────────────────── */}
-      <div style={{ marginTop: '8px', borderTop: '2px solid #000', paddingTop: '5px' }}>
-        <div style={{ fontWeight: 700, fontSize: '8pt', marginBottom: '3px' }}>CO Statements:</div>
-        {(p.parts || []).flatMap((part) => part.questionSets || []).flatMap((qs) => qs.questions || [])
-          .map((q, i) => q.co || `CO${i + 1}`)
-          .filter((co, i, arr) => arr.indexOf(co) === i)
-          .map((co, i) => (
-            <div key={co + i} style={{ fontSize: '8pt', lineHeight: '1.4' }}>
-              <strong>{co}:</strong> {co}
+      <div style={{ marginTop: '15px', borderTop: '2px solid #000', paddingTop: '3px' }}>
+        <div style={{ fontWeight: 700, fontSize: '7pt', marginBottom: '2px' }}>CO Statements:</div>
+        {coStatementsArr.length > 0 ? (
+          coStatementsArr.map((cs, i) => (
+            <div key={i} style={{ fontSize: '7pt', lineHeight: '1.5' }}>
+              <strong>{cs.co}:</strong> {cs.description}
             </div>
-          ))}
+          ))
+        ) : (
+          Array.from(usedCOs).sort().map((co, i) => (
+            <div key={i} style={{ fontSize: '7pt', lineHeight: '1.5' }}>
+              <strong>{co}:</strong> {co} — Refer to course syllabus for detailed outcome description.
+            </div>
+          ))
+        )}
+        {coStatementsArr.length === 0 && usedCOs.size === 0 && (
+          <div style={{ fontSize: '7pt', lineHeight: '1.5', color: '#888', fontStyle: 'italic' }}>
+            No CO statements available.
+          </div>
+        )}
       </div>
 
-      {/* ── ❽ VERIFIED / APPROVED FOOTER ───────────────────────── */}
+      {/* ── ❽ VERIFIED / APPROVED FOOTER (SINGLE INSTANCE - END OF DOCUMENT) ────────── */}
       <div style={{
-        marginTop: '12px',
+        marginTop: '15px',
         display: 'flex', justifyContent: 'space-between',
-        fontSize: '7.5pt', fontFamily: 'Arial, sans-serif', color: '#333'
+        fontSize: '7pt', fontFamily: 'Arial, sans-serif', color: '#333',
+        pageBreakInside: 'avoid'
       }}>
         {/* Verified by QPSC Member */}
         <div>
           Verified by QPSC Member{' '}
-          <div style={{ borderTop: '1px solid #000', width: '120px', marginTop: '24px' }}></div>
-          <div style={{ fontSize: '6.5pt', color: '#666', marginTop: '1px' }}>QPSC Member</div>
+          <div style={{ borderTop: '1px solid #000', width: '100px', marginTop: '24px' }}></div>
+          <div style={{ fontSize: '6pt', color: '#666', marginTop: '1px' }}>QPSC Member</div>
         </div>
         {/* Approved by HoD */}
         <div style={{ textAlign: 'right' }}>
           Approved by HoD{' '}
-          <div style={{ fontWeight: 700, fontSize: '7.5pt', marginTop: '18px', lineHeight: '1.4' }}>
-            <div style={{ borderTop: '1px solid #000', display: 'inline-block', width: '120px' }}></div>
-            PROF &amp; HEAD<br />
+          <div style={{ fontWeight: 700, fontSize: '7pt', marginTop: '18px', lineHeight: '1.5' }}>
+            <div style={{ borderTop: '1px solid #000', display: 'inline-block', width: '100px' }}></div>
+            PROF & HEAD<br />
             MASTER OF COMPUTER APPLICATIONS<br />
             M. Visvesvaraya Institute of Technology<br />
             Hunasamaranahalli, Bangalore-562 157
           </div>
         </div>
       </div>
+      {/* ── END OF PAGE - NO CONTENT BEYOND THIS LINE ── */}
 
     </div>
   );
-};
+};

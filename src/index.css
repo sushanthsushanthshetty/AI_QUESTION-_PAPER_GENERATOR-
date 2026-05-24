@@ -1147,3 +1147,139 @@ input[type="range"]::-webkit-slider-thumb:hover {
   border-color: rgba(239, 68, 68, 0.4);
   color: #fca5a5;
 }
+
+/* ========== MVIT PAPER PRINT STYLES ========== */
+.mvit-paper-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Times New Roman', serif;
+}
+
+.mvit-paper-table th {
+  background: #1a3560;
+  color: #fff;
+  font-weight: 700;
+  padding: 3px 4px;
+  font-size: 8.5pt;
+  border: 1px solid #000;
+  text-align: center;
+}
+
+.mvit-paper-table td {
+  border: 1px solid #000;
+  padding: 3px 4px;
+  font-size: 8.5pt;
+  vertical-align: top;
+  text-align: center;
+}
+
+.mvit-question-cell {
+  text-align: left;
+  vertical-align: top;
+}
+
+.mvit-part-heading {
+  background: #1a3560;
+  color: #fff;
+  font-weight: 800;
+  padding: 3px 6px;
+  font-size: 9.5pt;
+  font-family: 'Arial', sans-serif;
+  letter-spacing: 1px;
+}
+
+.mvit-header-box {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid #000;
+  text-align: center;
+  line-height: 22px;
+  font-size: 10pt;
+  font-weight: 700;
+  margin: 0 1px;
+}
+
+.mvit-instructions-bar {
+  border-top: 1.5px solid #000;
+  border-bottom: 1.5px solid #000;
+  padding: 4px 8px;
+  margin: 4px 0;
+  font-size: 8.5pt;
+  font-weight: 700;
+  font-family: 'Times New Roman', serif;
+}
+
+.mvit-info-grid {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0;
+}
+
+.mvit-info-grid td {
+  border: 1px solid #000;
+  padding: 2px 6px;
+  font-size: 8.5pt;
+}
+
+.mvit-info-label {
+  font-weight: 700;
+  background: #f5f5f5;
+  width: 38%;
+}
+
+.mvit-info-value {
+  font-weight: 600;
+}
+
+/* Editor card styling for per-sub-part metadata */
+.editor-question-card .mvit-meta-select {
+  padding: 3px 4px;
+  font-size: 0.75rem;
+  width: 54px;
+}
+
+.editor-question-card .mvit-meta-input {
+  padding: 3px 4px;
+  font-size: 0.75rem;
+  width: 60px;
+}
+
+/* Print media query for clean PDF export */
+@media print {
+  .main-workspace {
+    overflow: visible !important;
+    height: auto !important;
+    padding: 0 !important;
+  }
+  .dashboard-container {
+    display: block !important;
+  }
+  .sidebar {
+    display: none !important;
+  }
+  .glass-card {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .paper-container {
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+  .printable-paper {
+    width: 100% !important;
+    min-height: auto !important;
+    padding: 1.5cm !important;
+    box-shadow: none !important;
+    font-size: 12pt !important;
+  }
+  .btn, .question-actions-bubble, .workspace-header button {
+    display: none !important;
+  }
+  .workspace-header {
+    display: none !important;
+  }
+}
