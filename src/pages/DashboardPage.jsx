@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   BookOpen,
   FileText,
@@ -53,7 +54,13 @@ function getAuthHeaders() {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [page, setPage] = useState('create'); // 'create', 'history', 'settings', 'editor'
+  const location = useLocation();
+  const [page, setPage] = useState(() => {
+    if (location.state && location.state.defaultPage) {
+      return location.state.defaultPage;
+    }
+    return 'create';
+  }); // 'create', 'history', 'settings', 'editor'
 
   // App Config States
   const [subject, setSubject] = useState('');

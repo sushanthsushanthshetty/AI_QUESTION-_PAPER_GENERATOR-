@@ -32,13 +32,6 @@ export default function SignUpPage() {
   const { signUp, error, clearError, user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if already logged in
-  useEffect(() => {
-    if (user) {
-      navigate('/dashboard', { replace: true });
-    }
-  }, [user, navigate]);
-
   // Clear error on unmount
   useEffect(() => {
     return () => clearError();

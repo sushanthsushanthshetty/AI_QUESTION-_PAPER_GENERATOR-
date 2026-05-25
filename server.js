@@ -3,6 +3,7 @@ import cors from 'cors';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import dotenv from 'dotenv';
 import dns from 'dns';
 import { connectDB, getDB } from './db/connection.js';
@@ -16,14 +17,20 @@ dns.setServers(['8.8.8.8', '1.1.1.1']);
 dotenv.config();
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 app.use(cors());
 
 const PORT = process.env.PORT || 5000;
 const INCEPTION_API_KEY = process.env.INCEPTION_API_KEY || '';
 
 // Local JSON file path as fallback
-const DB_PATH = 'C:\\Users\\Admin\\.gemini\\antigravity\\scratch\\papers_db.json';
+const DB_PATH = path.join(
+  os.homedir(),
+  '.gemini',
+  'antigravity',
+  'scratch',
+  'papers_db.json'
+);
 
 // Ensure the local database directory and file exist
 function initializeDb() {

@@ -6,26 +6,246 @@ Built for **Sir M. Visvesvaraya Institute of Technology (MVIT)**, Department of 
 
 ---
 
-## 🚀 Features
+## 🚀 Features — Complete Module Overview
 
-- **User Authentication** — Full signup/login system with JWT-based authentication. Secure password hashing with bcryptjs. Token stored in `localStorage` for persistent sessions.
-- **AI-Powered Generation** — Enter syllabus content and generate a complete question paper with sections, marks, and cognitive levels via the Inception AI API.
-- **Bloom's Taxonomy Distribution** — Configure the weightage of Remember/Understand, Apply/Analyze, and Evaluate/Create questions via interactive sliders with live pie chart visualisation.
-- **Full Paper Editor** — After generation, edit every aspect of the paper:
-  - Metadata (subject, code, semester, test type, marks, duration)
-  - Section titles and marks-per-question
-  - Question text, marks, and cognitive level (drop-down with all 6 Bloom's levels)
-  - MCQ options and correct answers (4-option grid with correct answer selector)
-  - Add/delete/reorder questions and sections
-- **Preview Mode** — Switch between form editing and printable A4 preview styled as an official exam paper with university header, instructions, and signature lines.
-- **Export to PDF** — Download the paper as a professional A4 PDF using `html2canvas` + `jsPDF` with multi-page support. Works from both Edit and Preview modes (auto-switches to Preview).
-- **Save & History** — Papers are automatically saved to a local JSON database (`papers_db.json`) and can be revisited anytime from the Saved Papers sidebar.
-- **Single Question Regeneration** — Replace individual questions via AI with a single click (with simulated fallback if API fails).
-- **Immersive AI Loader** — Animated book-flip loader with rotating academic quotes and a live progress bar while generating.
-- **Client API Key Override** — Configure API key in the Settings page, which overrides the `.env` server key (stored in `localStorage`).
-- **Marks Audit** — Real-time validation showing whether section totals match the configured maximum marks, preventing generation with mismatched totals.
-- **History Management** — View, edit, or delete previously generated papers from a dedicated archive page with timestamps.
-- **Protected Routes** — Dashboard pages are protected behind authentication; unauthenticated users are redirected to login.
+### 📝 Module 1: User Authentication (`AuthContext.jsx` + `authRoutes.js` + `authenticateToken.js`)
+- **Sign Up** — Register with email, first name, last name, department, and password. Auto-generates a unique Teacher ID (`MVIT-DEPT-######` format).
+- **Login** — Authenticate with email/password. Passwords verified using bcryptjs (10-12 salt rounds).
+- **JWT Token** — On successful login/signup, a JWT token (configurable expiry, default 24h) is returned and stored in `localStorage` under the key `jwtToken`.
+- **Token Validation** — On app load, the stored JWT is validated via `GET /api/auth/validate`. If invalid/expired, token is cleared and user redirected to login.
+- **Profile Fetch** — `GET /api/auth/profile` returns the full teacher profile (sans password).
+- **Logout** — Clears JWT and API key from `localStorage`, resets auth state.
+- **Protected Routes** — `ProtectedRoute` component guards dashboard pages; unauthenticated users are redirected to `/login`.
+- **Dual Storage** — User accounts stored in MongoDB (`teachers` collection) or locally in `auth_db.json` as fallback.
+
+### 📄 Module 2: Paper Generation — Create Page (`DashboardPage.jsx` — Create View)
+- **Institutional Parameters Form** — Input fields for:
+  - Course Title, Course Code, Semester (1-8), Test Number (I/II)
+  - Maximum Marks, Duration (minutes)
+  - Faculty Name, Course/Branch (e.g., MCA), Subject Category (PCC/IPCC)
+  - Number of Parts (1-4), Questions per Part / OR sets (1-3)
+  - Syllabus Content / Topics Blueprint (textarea for AI context)
+  - CO Statements (optional, for footer)
+- **Bloom's Taxonomy Distribution** — Three interactive sliders for:
+  - **Remember/Understand** (L1-L2)
+  - **Apply/Analyze** (L3-L4)
+  - **Evaluate/Create** (L5-L6)
+  - Sliders auto-adjust to keep total at 100% — moving one rebalances the other two proportionally.
+- **Visual Pie Chart** — Live SVG donut chart displaying the cognitive level distribution with color-coded legend.
+- **Marks Audit** — Real-time validation comparing section totals against configured maximum marks. Generation is blocked on mismatch.
+- **AI Generation** — Click "Generate Question Paper" to send a POST request to `/api/generate-paper` with all parameters.
+- **Backend Prompt Engineering** — The server constructs a detailed system prompt with role definition, exact JSON schema, Bloom's weight requirements, section structure constraints, and marks consistency rules.
+- **AI Response Parsing** — A 7-tier `repairJSON()` utility handles AI responses:
+  1. Direct JSON parse
+  2. Regex trailing comma removal
+  3. Character-by-character state machine reconstruction (handles unescaped quotes, newlines in strings, etc.)
+  4. Aggressive ASCII-whitelist cleanup
+- **Immersive AI Loader** — Animated book-flip loader with:
+  - Rotating academic quotes (6 curated quotes from B.B. King, Einstein, Krishnamurti, etc.)
+  - Live progress bar with random increment simulation
+  - "Cognitive Syllabus Scanner" branding
+- **Fallback Paper Generation** — If the AI API fails, `generateFallbackPaper()` creates a valid MVIT-format paper locally using 5 question templates with syllabus-derived topics, distributing marks across parts and assigning CO/BL/PO/PI values.
+- **Auto-Save** — Generated papers are automatically saved to the database on success.
+- **Legacy Section Support** — Backward-compatible with older saved papers using the `sections[]` format.
+
+### ✏️ Module 3: Paper Editor (`DashboardPage.jsx` — Editor View)
+- **Paper Metadata Editing** — Inline edit fields for:
+  - Subject Name, Subject Code, Semester, Course/Branch
+  - Faculty Name, Subject Category (PCC/IPCC dropdown)
+  - Test Number (I/II dropdown), Max Marks, Duration
+  - CO Statements (raw textarea for footer)
+- **MVIT-Format Editor** — Full editing of the `parts[]` structure:
+  - **Part Headers** — Display part title (Part A, Part B, etc.) with mark weight summary.
+  - **Question Sets** — Each part contains 1+ question sets (OR alternatives). Sets displayed with an "OR" separator between them.
+  - **Per Sub-Part Fields** — Each sub-part (`a)`, `b)`) has editable fields:
+    - **Question Text** — Textarea for the sub-question content
+    - **Marks** — Number input for individual mark weight
+    - **CO** — Dropdown (CO1-CO4) for Course Outcome
+    - **BL** — Dropdown (L1-L6) for Bloom's Taxonomy Level
+    - **PO** — Dropdown (PO1-PO4) for Program Outcome
+    - **PI** — Text input for Performance Indicator (e.g., 1.7.1)
+  - **Immutable Update Helpers** — `_updateSubPart()`, `_updateQuestionMeta()`, `_replacePart()`, `_replaceQuestionsInSet()` ensure state integrity.
+- **Add/Delete Sections** — Buttons to add new sections or delete existing ones.
+- **Add/Delete/Reorder Questions** — Within each section, questions can be added, deleted, or moved up/down.
+- **Legacy Section Editor** — Backward-compatible renderer for older saved papers.
+- **Marks Summary Bar** — Displays total calculated marks vs configured max marks with balance status (✓ balanced / ⚠ mismatch).
+- **Single Question Inline Editing** — Click to edit individual question text, marks, and MCQ options directly.
+- **Single Question AI Regeneration** — Regenerate individual questions:
+  - Sends `POST /api/regenerate-question` with syllabus context, original text, cognitive level, marks, and type.
+  - On API failure, falls back to a simulated replacement from 5 predefined academic questions.
+- **Edit/Preview Mode Toggle** — Switch between form editing and A4 preview with dedicated buttons.
+- **Save & Export** — Save changes to database or export as PDF.
+
+### 👁️ Module 4: Paper Preview (`MVITPaperPreview` Component)
+- **Printable A4 Format** — Rendered as a 210mm × 297mm printable page with:
+  - **Date Boxes** — Day | Month | Year in individual bordered boxes
+  - **Subject Code Boxes** — Each character in an individual bordered box
+  - **Logo** — MVIT/SVIT logo image in the header
+  - **USN Boxes** — Pre-filled "1 | M | V" + 8 empty boxes for student USN
+- **College Header** — "Sir M. Visvesvaraya Institute of Technology, Bengaluru-562 157"
+- **Test Title** — Bold centered test number with top/bottom border
+- **Information Table** — Colon-format table with:
+  - TEST NO, COURSE/BRANCH, SUBJECT, SUBJECT CATEGORY(IPCC/PCC)
+  - SEMESTER, MAX. MARKS, DURATION, FACULTY NAME
+- **Instructions** — "Answer any one Question from each Part"
+- **Bloom's Taxonomy Legend** — Underline-styled key for BL, CO, PO, PI abbreviations
+- **Question Table** — Professional table with columns:
+  - Q.No | Question | Marks | CO | BL | PO | PI
+  - Sub-parts displayed as rows with row-span for question numbers
+- **OR Separators** — "─── OR ───" between alternative question sets within each part
+- **CO Statements Footer** — Auto-generated from paper data or raw text input
+- **Signature Lines** — "Verified by QPSC Member" and "Approved by HoD" with signature lines and department details
+
+### 💾 Module 5: Data Storage & Persistence
+- **Dual Storage Architecture** — MongoDB + local JSON file fallback for both auth and papers:
+  - **MongoDB** — Primary storage for user accounts (`teachers` collection) and papers (`papers` collection)
+  - **Local JSON** — Automatic fallback stored at:
+    - Papers: `C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json`
+    - Auth: `.gemini\antigravity\scratch\auth_db.json`
+  - **Browser localStorage** — JWT token (`jwtToken`) and API key (`inception_api_key`)
+- **Paper Operations**:
+  - **Save/Upsert** — `POST /api/save-paper` with upsert by `paperId`
+  - **Read** — `GET /api/papers` returns all papers for authenticated user, sorted by creation date
+  - **Update** — `PUT /api/papers/:id` with ownership check
+  - **Delete** — `DELETE /api/papers/:id` with ownership verification
+- **Ownership Enforcement** — All paper operations filter/save per `teacherId` extracted from JWT
+- **Paper IDs** — Generated as `paper-{timestamp}-{random}` format
+
+### 📜 Module 6: History & Saved Papers (`DashboardPage.jsx` — History View)
+- **Archive List** — Displays all saved papers with:
+  - Subject name and code
+  - Semester, test number, marks, duration
+  - Creation timestamp
+- **Actions Per Paper**:
+  - **Open** — Opens paper in the editor for modification
+  - **Preview** — Opens paper directly in preview mode
+  - **Delete** — Permanently removes paper with confirmation
+- **Empty State** — Friendly message with icon when no saved papers exist
+- **Real-Time Refresh** — Paper list refreshes after save/delete operations
+
+### 📥 Module 7: PDF Export
+- **html2canvas** — Captures the preview DOM as a canvas image at 2x scale with CORS support
+- **jsPDF** — Generates a professional A4 PDF (210mm × 297mm):
+  - Auto-scales content to fit a single page if overflow occurs
+  - Calculates aspect-ratio-preserved dimensions
+- **Dual Mode Export** — Works from both Edit and Preview modes (auto-switches to Preview before capture)
+- **File Naming** — PDF saved as `{SubjectCode}_{TestNo}_Paper.pdf`
+- **Temporary UI Hiding** — Action bubbles/buttons are hidden during capture for clean output
+
+### ⚙️ Module 8: Settings (`DashboardPage.jsx` — Settings View)
+- **API Key Configuration** — Password-input field for Inception API key:
+  - Overrides the `.env` `INCEPTION_API_KEY` value
+  - Stored securely in `localStorage`
+  - Save and Clear buttons with success notifications
+- **Model Information** — Read-only display of:
+  - Primary Inception Model: `mercury-2`
+  - API Endpoint: `https://api.inceptionlabs.ai/v1`
+- **Server Status** — `GET /api/status` endpoint checks if server-side API key is configured
+
+### 🧭 Module 9: Navigation & UI (`Navbar.jsx` + `App.jsx`)
+- **Sidebar Navigation** — Fixed sidebar with:
+  - Logo badge ("QP") and branding ("MVIT Generator — Academic Rigor AI")
+  - User avatar (initials) and info display (name, teacher ID)
+  - Nav items: Create Paper, Editing Paper (conditional), Saved Papers, AI Configurations
+  - Logout button with icon
+  - API status indicator (green dot)
+  - Version footer ("v1.0")
+- **Routing** — React Router with routes:
+  - `/login` — Login page
+  - `/signup` — Registration page
+  - `/dashboard` — Main application (protected)
+  - `/` — Redirects to `/dashboard`
+  - `*` — 404 Not Found page
+- **Protected Routes** — `ProtectedRoute` component with loading spinner during token validation
+- **Global Notifications** — Alert (red) and Success (green) toast messages with icons
+
+### 🛡️ Module 10: Security
+- **Password Hashing** — bcryptjs with configurable salt rounds (default 10-12)
+- **JWT Authentication** — Tokens with configurable expiry (default 24h), signed with secret from `.env`
+- **Authorization Headers** — All API requests (except auth endpoints) include `Authorization: Bearer <token>`
+- **Ownership Enforcement** — Papers filtered, updated, and deleted per authenticated `teacherId`
+- **Input Validation** — Auth routes validate required fields, password length (min 6 chars), and duplicate email checks
+- **DNS Fix** — IPv4-first DNS resolution for reliable MongoDB SRV lookups
+
+### 🔄 Module 11: API Endpoints (Complete List)
+
+| Endpoint | Method | Auth | Purpose |
+|----------|--------|------|---------|
+| `/api/auth/signup` | POST | No | Register a new teacher account |
+| `/api/auth/login` | POST | No | Log in and receive JWT token |
+| `/api/auth/validate` | GET | Yes | Validate JWT token and return user profile |
+| `/api/auth/profile` | GET | Yes | Get full teacher profile (without password) |
+| `/api/papers` | GET | Yes | Retrieve all saved papers for the authenticated user |
+| `/api/status` | GET | No | Check if the server-side API key is configured |
+| `/api/save-paper` | POST | Yes | Save or update a paper (upsert by paperId) |
+| `/api/papers/:id` | DELETE | Yes | Delete a paper by its ID (ownership check) |
+| `/api/papers/:id` | PUT | Yes | Update an existing paper (ownership check) |
+| `/api/generate-paper` | POST | Yes | Generate a full question paper using Inception AI API |
+| `/api/regenerate-question` | POST | Yes | Regenerate a single question using Inception AI API |
+
+---
+
+## 🛠️ Complete Tech Stack
+
+### Runtime & Language
+| Technology | Purpose |
+|------------|---------|
+| **Node.js** | JavaScript runtime (v18+, tested with v24.15.0) |
+| **ES Modules** | `"type": "module"` in package.json for native ESM |
+
+### Frontend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **React** | ^19.2.6 | UI framework with hooks (`useState`, `useEffect`, `createContext`, `useContext`) |
+| **React DOM** | ^19.2.6 | React rendering for the browser |
+| **React Router DOM** | ^7.15.1 | Client-side routing with protected routes, navigation, and redirects |
+| **Vite** | ^8.x (estimated) | Build tool and dev server with HMR and API proxy configuration |
+| **@vitejs/plugin-react** | — | Vite plugin for React JSX transform and Fast Refresh |
+| **Lucide React** | ^1.16.0 | Icon library (26+ icons: BookOpen, FileText, Settings, Download, RefreshCw, Plus, Trash2, History, CheckCircle, AlertTriangle, ArrowUp/Down, Edit3, Save, Sparkles, Layers, Clock, Award, Eye, ArrowLeft, X, Copy, Check, LogOut, User) |
+
+### Backend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **Express** | ^5.2.1 | Web server framework with JSON body parsing (10mb limit) and CORS |
+| **Axios** | ^1.16.1 | HTTP client for Inception AI API calls (90s timeout for generation, 60s for single-question) |
+| **CORS** | ^2.8.6 | Cross-origin resource sharing middleware |
+| **dotenv** | ^17.4.2 | Environment variable management (.env file loading) |
+| **jsonwebtoken** | ^9.0.3 | JWT token creation and verification for authentication |
+| **bcryptjs** | ^3.0.3 | Password hashing and verification (10-12 salt rounds) |
+| **MongoDB Driver** | ^7.2.0 | Native MongoDB connection with indexed collections and SRV DNS resolution |
+| **dns** | (built-in) | IPv4 DNS resolution fix for MongoDB SRV lookups (`dns.setDefaultResultOrder('ipv4first')`) |
+
+### PDF Export
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| **html2canvas** | ^1.4.1 | Captures DOM elements as canvas images (2x scale, CORS support) |
+| **jsPDF** | ^4.2.1 | Generates A4 PDF documents (210mm × 297mm) with multi-page auto-scaling |
+
+### AI / Machine Learning
+| Technology | Purpose |
+|------------|---------|
+| **Inception Labs API** | AI text generation endpoint (`https://api.inceptionlabs.ai/v1/chat/completions`) |
+| **Model: mercury-2** | Primary AI model for question paper generation (4000 max tokens) |
+| **Bearer Token Auth** | API authentication via `INCEPTION_API_KEY` env var or client-provided key |
+
+### Data Persistence
+| Technology | Purpose |
+|------------|---------|
+| **MongoDB** | Primary database for user accounts (`teachers`) and papers (`papers`) with optional connection |
+| **File-based JSON** | Automatic fallback storage in `.gemini\antigravity\scratch\` directory |
+| **Browser localStorage** | Client-side storage for JWT token and API key caching |
+
+### Development & Build Tools
+| Technology | Purpose |
+|------------|---------|
+| **concurrently** | ^9.2.1 | Runs frontend (Vite) and backend (Express) simultaneously via `npm run dev` |
+| **ESLint** | — | Code linting with Flat config (`eslint.config.js`) |
+
+### Infrastructure & DevOps
+| Technology | Purpose |
+|------------|---------|
+| **git** | Version control with `.gitignore` |
+| **npm** | Package management with `package-lock.json` |
 
 ---
 
@@ -123,52 +343,48 @@ Open your browser and navigate to: **http://localhost:3000**
 ### Step 2: Configure Parameters
 - Enter the **Course Title**, **Course Code**, **Semester**, and **Evaluation Cycle** (e.g. "Internal Assessment I").
 - Set **Maximum Marks** and **Duration** (minutes).
+- Fill in **Faculty Name**, **Course/Branch**, and **Subject Category** (PCC/IPCC).
+- Configure **Number of Parts** and **Questions per Part** (OR sets).
 - Paste or type the **Syllabus Content** in the text area — this is what the AI uses to generate relevant questions.
+- Optionally enter **CO Statements** for the paper footer.
 
-### Step 3: Define Sections
-- Sections represent parts of your exam paper (e.g. Part A — MCQs, Part B — Short Answers, Part C — Long Answers).
-- For each section, set:
-  - **Section Title** (editable)
-  - **Number of Questions**
-  - **Marks Per Question**
-- The **Marks Audit** bar at the bottom shows if the total matches your configured max marks — generation is blocked if mismatched.
-
-### Step 4: Set Cognitive Distribution
+### Step 3: Set Cognitive Distribution
 - Use the 3 interactive sliders to balance **Remember/Understand**, **Apply/Analyze**, and **Evaluate/Create** (Bloom's Taxonomy levels).
 - The sliders auto-adjust as you move them to keep the total at 100%.
 - A live SVG donut chart visualises the distribution.
 
-### Step 5: Generate
+### Step 4: Generate
 - Click **"Generate Question Paper"** — the app sends a POST request to `/api/generate-paper` on your backend.
 - The backend constructs a detailed system prompt with the syllabus, Bloom's weights, and section schema, then calls the Inception AI API (`mercury-2` model).
 - An immersive loader with a book-flip animation, rotating academic quotes, and a progress bar appears.
 - On success, the paper is auto-saved to the local database and the **Paper Editor** opens automatically.
+- If the AI API fails, a fallback paper generator creates a valid MVIT-format paper locally.
 
-### Step 6: Edit & Preview
+### Step 5: Edit & Preview
 - In **Edit mode**, modify any field:
-  - **Paper Metadata**: subject name, code, semester, test type, marks, duration
-  - **Section Titles & Marks Per Question**
-  - **Question Text**: textareas for each question
-  - **Marks & Cognitive Level**: per-question number input and Bloom's level dropdown
-  - **MCQ Options**: 4-option grid with a correct answer selector
-  - **Reorder Questions**: up/down arrow buttons
-  - **Add/Delete Questions & Sections**: buttons for each
+  - **Paper Metadata**: subject name, code, semester, branch, faculty, category, test type, marks, duration
+  - **Part Structure**: Part titles, question sets with OR alternatives
+  - **Per Sub-Part Fields**: Question text, marks, CO, BL, PO, PI (all individually editable)
+  - **Add/Delete Sections & Questions**
+  - **Reorder Questions**
+  - **Single Question AI Regeneration** — Regenerate individual questions with one click
 - Switch to **Preview** to see the printable A4 format with:
   - University header: "SIR M. VISVESVARAYA INSTITUTE OF TECHNOLOGY"
-  - Department header: "DEPARTMENT OF COMPUTER SCIENCE & ENGINEERING"
-  - Test title, course info, duration, and max marks
-  - General instructions (3 standard exam rules)
-  - All sections with questions, MCQ options, cognitive levels, and course outcomes
-  - Signature lines for Course Coordinator, Module Coordinator, and Head of Department
-- Click **Save** to persist changes, or **Export PDF** to download as a professional PDF (works from both Edit and Preview modes).
+  - Department header, test title, course info, duration, and max marks
+  - General instructions and Bloom's Taxonomy legend
+  - Professional 7-column question table (Q.No, Question, Marks, CO, BL, PO, PI)
+  - OR separators between alternative sets
+  - CO Statements footer and signature lines (QPSC Member + HoD)
+- Click **Save** to persist changes, or **Export PDF** to download as a professional PDF.
 
-### Step 7: History
+### Step 6: History
 - Navigate to **Saved Papers** from the sidebar.
 - Each entry shows: subject code, subject name, test type, semester, marks, duration, and creation timestamp.
 - Click **Edit** to reopen any saved paper in the editor.
+- Click **Preview** for direct A4 preview.
 - Click the trash icon to delete a paper permanently.
 
-### Step 8: Settings
+### Step 7: Settings
 - **API Key**: Enter a custom Inception API key that overrides the `.env` value (stored in `localStorage`).
 - **Model Info**: Displays the active model (`mercury-2`) and API endpoint (`https://api.inceptionlabs.ai/v1`) as read-only.
 
@@ -199,6 +415,9 @@ Path: .gemini/antigravity/scratch/auth_db.json
 | Sign Up | `db.collection('teachers').insertOne(teacherDoc)` | `readTeachers() → push → writeTeachers()` |
 | Login | `findOne({ email })` | `find(t => t.email === email)` |
 | Token Validation | JWT decode (no DB needed) | JWT decode (no DB needed) |
+| Profile Fetch | `findOne({ teacherId })` with password projection | `find(t => t.teacherId === req.teacherId)` |
+
+**Teacher ID Format:** `MVIT-{DeptCode}-{6-digit sequential number}` (e.g., `MVIT-CS-000001`)
 
 ### 2. Generated Papers → Local JSON Database
 
@@ -214,26 +433,49 @@ Path: C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json
 |------|-------------|
 | **Save** | `POST /api/save-paper` → upsert by `paperId` |
 | **Read** | `GET /api/papers` → reads file, parses JSON, returns array |
-| **Delete** | `DELETE /api/papers/:id` → filters out that paper, writes back |
+| **Update** | `PUT /api/papers/:id` → ownership check, replaces document |
+| **Delete** | `DELETE /api/papers/:id` → ownership check, filters out that paper |
 | **Format** | JSON array with 2-space indent pretty-printing |
 
-**Example entry:**
+**Paper Structure (MVIT format with parts[]):**
 ```json
-[
-  {
-    "paperId": "paper-1716281234567",
-    "subject": "Machine Learning",
-    "subjectCode": "21CS61",
-    "semester": 6,
-    "testNo": "Internal Assessment I",
-    "maxMarks": 50,
-    "duration": 90,
-    "teacherId": "MVIT-CS-000001",
-    "sections": [...],
-    "createdAt": "2026-05-22T15:30:00.000Z",
-    "updatedAt": "2026-05-22T15:30:00.000Z"
-  }
-]
+{
+  "paperId": "paper-1716281234567",
+  "subject": "Machine Learning",
+  "subjectCode": "21CS61",
+  "semester": 6,
+  "testNo": "TEST PAPER - I",
+  "maxMarks": 50,
+  "duration": 90,
+  "facultyName": "Dr. Ramesh Kumar",
+  "courseBranch": "MCA",
+  "subjectCategory": "PCC",
+  "teacherId": "MVIT-CS-000001",
+  "coStatements": [
+    {"co": "CO1", "description": "Understand ML fundamentals"},
+    {"co": "CO2", "description": "Analyze supervised learning algorithms"}
+  ],
+  "parts": [
+    {
+      "partNo": 1,
+      "partTitle": "PART A",
+      "questionSets": [
+        {
+          "setNo": 1,
+          "questions": [{
+            "qNo": "1",
+            "subParts": [
+              {"label": "a)", "text": "Explain...", "marks": 5, "co": "CO1", "bl": "L2", "po": "PO1", "pi": "1.7.1"},
+              {"label": "b)", "text": "Describe...", "marks": 7, "co": "CO1", "bl": "L3", "po": "PO1", "pi": "1.7.1"}
+            ]
+          }]
+        }
+      ]
+    }
+  ],
+  "createdAt": "2026-05-22T15:30:00.000Z",
+  "updatedAt": "2026-05-22T15:30:00.000Z"
+}
 ```
 
 ### 3. API Key → Browser localStorage
@@ -249,7 +491,7 @@ Path: C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json
 |------|--------|
 | Syllabus content | Only used as context for the AI prompt |
 | Bloom's distribution | Resets to defaults (40/40/20) on page refresh |
-| Section configuration | Resets to default 3-section layout on refresh |
+| Section configuration | Resets to default layout on refresh |
 
 ---
 
@@ -258,133 +500,27 @@ Path: C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json
 ```
 ┌───────────────────────┐      ┌──────────────────────┐      ┌──────────────────┐
 │   Frontend (React 19) │─────▶│   Backend (Express 5) │─────▶│  Inception AI    │
-│   Vite Dev Server     │      │   Port: 5000         │      │  mercury-2 API   │
+│   Vite Dev Server     │      │   Port: 5000          │      │  mercury-2 API   │
 │   Port: 3000          │      └──────────┬───────────┘      └──────────────────┘
 └──────────┬────────────┘                 │
            │                              │
            ▼                              ▼
     localStorage                    Local JSON DB
     (JWT token, API key)            (papers_db.json, auth_db.json)
-                                    MongoDB (optional, for auth)
+                                    MongoDB (optional, for auth & papers)
 ```
 
-### Frontend (`src/`)
+### Architecture Highlights
 
-| File | Purpose |
-|------|---------|
-| `src/main.jsx` | React entry point — mounts `<App />` |
-| `src/App.jsx` | Root component — sets up React Router and AuthContext |
-| `src/App.css` | Application-level styles |
-| `src/index.css` | Global CSS variables, fonts, base styles |
-| `src/pages/LoginPage.jsx` | Login form with email/password |
-| `src/pages/SignUpPage.jsx` | Registration form with name, email, department, password |
-| `src/pages/DashboardPage.jsx` | **Main application** — paper generation, editor, preview, history, settings (~1149 lines) |
-| `src/pages/NotFoundPage.jsx` | 404 error page |
-| `src/components/Navbar.jsx` | Sidebar navigation component |
-| `src/components/ProtectedRoute.jsx` | Route guard — redirects unauthenticated users to login |
-| `src/context/AuthContext.jsx` | Authentication context — login, logout, signup, token validation |
-
-### Backend (`server.js` + routes + middleware)
-
-| File | Purpose |
-|------|---------|
-| `server.js` | Express server — API endpoints, MongoDB init, JSON repair utility |
-| `routes/authRoutes.js` | Auth routes — `/api/auth/signup`, `/api/auth/login`, `/api/auth/validate`, `/api/auth/profile` |
-| `middleware/authenticateToken.js` | JWT verification middleware |
-| `db/connection.js` | MongoDB connection manager with local JSON fallback |
-
-### API Endpoints
-
-| Endpoint | Method | Auth | Purpose |
-|----------|--------|------|---------|
-| `/api/auth/signup` | POST | No | Register a new teacher account |
-| `/api/auth/login` | POST | No | Log in and receive JWT token |
-| `/api/auth/validate` | GET | Yes | Validate JWT token and return user profile |
-| `/api/auth/profile` | GET | Yes | Get full teacher profile (without password) |
-| `/api/papers` | GET | Yes | Retrieve all saved papers for the authenticated user |
-| `/api/status` | GET | No | Check if the server-side API key is configured |
-| `/api/save-paper` | POST | Yes | Save or update a paper (upsert by paperId) |
-| `/api/papers/:id` | DELETE | Yes | Delete a paper by its ID (ownership check) |
-| `/api/papers/:id` | PUT | Yes | Update an existing paper (ownership check) |
-| `/api/generate-paper` | POST | Yes | Generate a full question paper using Inception AI API |
-| `/api/regenerate-question` | POST | Yes | Regenerate a single question using Inception AI API |
-
-### Key Backend Logic
-
-- **`server.js` lines 207-315** — `repairJSON()` utility: multi-tier JSON parsing with markdown removal, trailing comma fixes, unescaped quote handling, and aggressive character filtering.
-- **`server.js` lines 318-453** — Paper generation endpoint: system prompt construction with Bloom's Taxonomy weights, section structure, and strict output schema.
-- **`server.js` lines 456-556** — Single question regeneration: focused prompt for one replacement question.
-- **`server.js` lines 207-208** — Local database at `C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json`.
+- **Dual Storage Layer** — MongoDB as primary with transparent JSON file fallback; no configuration needed to switch.
+- **AI Response Repair Pipeline** — 7-tier JSON repair utility handles malformed AI output gracefully.
+- **Immutable State Updates** — Editor uses pure update helpers (`_updateSubPart`, `_updateQuestionMeta`, etc.) to maintain React state integrity.
+- **Ownership-Based Access** — Every paper operation is scoped to the authenticated teacher's ID.
+- **Fallback Chain** — AI generation → fallback template → graceful error, ensuring the app never crashes on API failure.
 
 ---
 
-## 🛠️ Tech Stack (Complete)
-
-### Runtime & Language
-- **Node.js** — JavaScript runtime
-- **ES Modules** (`"type": "module"` in package.json)
-
-### Frontend
-- **React 19** — UI framework with hooks (`useState`, `useEffect`)
-- **React Router DOM v7** — Client-side routing with protected routes
-- **Vite 8** — Build tool and dev server with API proxy configuration
-- **Lucide React** — Icon library (26+ icons)
-
-### Backend
-- **Express 5** — Web server framework
-- **Axios** — HTTP client for Inception API calls (90s timeout for generation, 60s for single-question)
-- **CORS** — Cross-origin resource sharing middleware
-- **dotenv** — Environment variable management
-- **jsonwebtoken** — JWT token creation and verification
-- **bcryptjs** — Password hashing (12 rounds by default)
-- **MongoDB Driver** — Optional MongoDB connection with indexed collections
-- **dns** — IPv4 DNS resolution fix for MongoDB SRV lookups
-
-### PDF Export
-- **html2canvas** — Captures the preview DOM as a canvas image (2x scale)
-- **jsPDF** — Generates A4 PDF with multi-page support (210mm × 295mm)
-
-### Development Tools
-- **concurrently** — Runs frontend and backend simultaneously via `npm run dev`
-- **ESLint** — Code linting (Flat config)
-- **@vitejs/plugin-react** — Vite React plugin
-
-### AI API
-- **Inception Labs API** — `https://api.inceptionlabs.ai/v1/chat/completions`
-- **Model** — `mercury-2`
-- **Auth** — Bearer token from `INCEPTION_API_KEY` env var or client-provided key
-
-### Data Persistence
-- **MongoDB** (optional) — Primary storage for user accounts and papers
-- **File-based JSON** (fallback) — `papers_db.json`, `auth_db.json`
-- **Browser localStorage** — JWT token and API key caching
-
-### Dependencies (from package.json)
-
-```json
-{
-  "dependencies": {
-    "axios": "^1.16.1",
-    "bcryptjs": "^3.0.3",
-    "concurrently": "^9.2.1",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "html2canvas": "^1.4.1",
-    "jsonwebtoken": "^9.0.3",
-    "jspdf": "^4.2.1",
-    "lucide-react": "^1.16.0",
-    "mongodb": "^7.2.0",
-    "react": "^19.2.6",
-    "react-dom": "^19.2.6",
-    "react-router-dom": "^7.15.1"
-  }
-}
-```
-
----
-
-## 📄 File Structure
+## 📄 Complete File Structure
 
 ```
 ├── .env                        # API keys, MongoDB URI, JWT secret
@@ -394,33 +530,43 @@ Path: C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json
 ├── package.json                # Dependencies, scripts
 ├── package-lock.json           # Dependency lockfile
 ├── README.md                   # This file
-├── server.js                   # Express backend server (584 lines)
+├── server.js                   # Express backend server (810 lines — API endpoints, JSON repair, fallback generator)
 ├── vite.config.js              # Vite dev server config with API proxy
+│
 ├── db/
-│   └── connection.js           # MongoDB connection manager
+│   └── connection.js           # MongoDB connection manager with status tracking
+│
 ├── middleware/
 │   └── authenticateToken.js    # JWT authentication middleware
+│
 ├── routes/
-│   └── authRoutes.js           # Authentication route handlers
+│   └── authRoutes.js           # Authentication route handlers (signup, login, validate, profile)
+│
 ├── public/
 │   ├── favicon.svg             # Site favicon
-│   └── icons.svg               # SVG icons
+│   ├── icons.svg               # SVG icons
+│   └── logo.png                # MVIT logo for preview
+│
 └── src/
     ├── main.jsx                # React entry point
-    ├── App.jsx                 # Root component (routing + auth context)
-    ├── App.css                 # Application styles
-    ├── index.css               # Global styles (1149 lines)
+    ├── App.jsx                 # Root component (routing + auth context provider)
+    ├── App.css                 # Application-level styles
+    ├── index.css               # Global CSS variables, fonts, base styles (1149 lines)
+    │
     ├── assets/                 # Static assets
+    │
     ├── components/
-    │   ├── Navbar.jsx          # Sidebar navigation
-    │   └── ProtectedRoute.jsx  # Auth route guard
+    │   ├── Navbar.jsx          # Sidebar navigation with user info, nav items, logout
+    │   └── ProtectedRoute.jsx  # Auth route guard with loading spinner
+    │
     ├── context/
-    │   └── AuthContext.jsx     # Authentication context provider
+    │   └── AuthContext.jsx     # Authentication context provider (login, signup, logout, validate)
+    │
     └── pages/
-        ├── LoginPage.jsx       # Login page
-        ├── SignUpPage.jsx      # Registration page
-        ├── DashboardPage.jsx   # Main app (generator, editor, preview, history, settings)
-        └── NotFoundPage.jsx    # 404 page
+        ├── LoginPage.jsx       # Login page with email/password form
+        ├── SignUpPage.jsx      # Registration page with all fields
+        ├── DashboardPage.jsx   # Main app (1570 lines — create, editor, preview, history, settings, MVITPaperPreview)
+        └── NotFoundPage.jsx    # 404 error page
 ```
 
 ---
@@ -435,50 +581,53 @@ Path: C:\Users\Admin\.gemini\antigravity\scratch\papers_db.json
 | `401 Unauthorized` | Your JWT token has expired. Log out and log in again. |
 | `Invalid token. Please log in again.` | Token expired or was cleared. Log in again via the Login page. |
 | `AI returned empty response` | The Inception API model didn't generate content. Try again — may be a transient API issue. |
-| PDF export doesn't work | The export button now auto-switches to Preview mode before capturing. If it still fails, check browser console for errors. Try Chrome/Edge. |
-| Marks mismatch error on generate | The sum of (questions count × marks per question) must equal the configured Maximum Marks. Adjust section counts or marks. |
+| PDF export doesn't work | The export button auto-switches to Preview mode before capturing. If it still fails, check browser console for errors. Try Chrome/Edge. |
+| Marks mismatch error on generate | The sum of all sub-part marks must equal the configured Maximum Marks. Adjust part/question marks in the editor. |
 | Port already in use | Change `PORT` in `.env` (backend) or the `port` in `vite.config.js` (frontend). |
 | MongoDB connection fails | The app falls back to local JSON files automatically. No user action needed. |
 | Blank white page | Check browser console for errors. Ensure both backend and frontend are running. |
+| AI generates malformed JSON | The `repairJSON()` utility handles most formatting issues. If it fails, try regenerating. |
 
 ---
 
 ## 🔐 Authentication Flow
 
-1. **Sign Up** — `POST /api/auth/signup` creates a teacher record (hashed password) and returns a JWT.
+1. **Sign Up** — `POST /api/auth/signup` creates a teacher record (hashed password with bcryptjs) and returns a JWT.
 2. **Login** — `POST /api/auth/login` verifies credentials and returns a JWT.
 3. **Token Storage** — JWT is stored in `localStorage` under the key `jwtToken`.
 4. **Authenticated Requests** — All paper-related API calls include `Authorization: Bearer <token>` header.
 5. **Token Validation** — On app load, `AuthContext.validateToken()` calls `GET /api/auth/validate` to check token validity.
 6. **Protected Routes** — `ProtectedRoute` component checks `AuthContext.isAuthenticated` and redirects to `/login` if false.
-7. **Logout** — Clears JWT from `localStorage` and resets auth state.
+7. **Logout** — Clears JWT and API key from `localStorage`, resets auth state.
 
 ---
 
 ## 🔐 Security Notes
 
-- Passwords are hashed with bcryptjs (12 salt rounds by default).
+- Passwords are hashed with bcryptjs (10-12 salt rounds, configurable via `BCRYPT_ROUNDS` in `.env`).
 - JWT tokens expire after 24 hours (configurable via `JWT_EXPIRY` in `.env`).
 - Paper API endpoints **enforce ownership** — papers are filtered/saved per `teacherId` extracted from the JWT.
-- Delete and update operations check ownership before applying changes.
+- Delete and update operations verify ownership before applying changes.
+- Auth routes validate required fields and enforce minimum password length (6 characters).
 
 ---
 
 ## 🧪 How the Generation Works
 
-1. **User fills the form** — subject, syllabus, sections, Bloom's distribution.
-2. **Frontend validates** — checks configured total marks match max marks.
+1. **User fills the form** — subject, syllabus, parts configuration, Bloom's distribution.
+2. **Frontend validates** — checks all required fields are present.
 3. **POST `/api/generate-paper`** — sends all parameters in JSON body with JWT auth.
 4. **Backend constructs AI prompt** — a detailed system prompt with:
    - Role definition ("expert academic evaluator")
-   - Exact JSON schema
+   - Exact JSON schema with parts[], questionSets[], subParts[] structure
    - Bloom's Taxonomy weight requirements
-   - Section structure constraints
-   - Marks consistency constraint
+   - Part structure constraints (number of parts, sets per part, marks distribution)
+   - Per sub-part field requirements (label, text, marks, co, bl, po, pi)
 5. **Inception API call** — `mercury-2` model, max 4000 tokens, 90s timeout.
-6. **Response parsing** — 3-tier fallback (direct parse → regex extraction → aggressive cleaning).
+6. **Response parsing** — 7-tier `repairJSON()` fallback (direct parse → regex → state machine → aggressive cleanup).
 7. **Auto-save** — paper is saved to database and returned to frontend.
-8. **Editor opens** — deep clone allows editing without affecting saved version until explicitly saved.
+8. **Editor opens** — immediate editing capability in the MVIT-format editor.
+9. **Fallback** — If AI fails, `generateFallbackPaper()` creates a valid paper using local templates.
 
 ---
 

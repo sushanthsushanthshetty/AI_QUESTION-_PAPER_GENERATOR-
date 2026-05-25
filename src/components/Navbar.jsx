@@ -13,21 +13,25 @@ export default function Navbar({ currentPage, setPage }) {
   };
 
   const handleNavClick = (page) => {
-    if (setPage) setPage(page);
+    if (currentPage === 'profile') {
+      navigate('/dashboard', { state: { defaultPage: page } });
+    } else if (setPage) {
+      setPage(page);
+    }
   };
 
   return (
     <div className="sidebar">
       <div className="sidebar-header">
         <div className="logo-badge">QP</div>
-        <div className="logo-text">
+        <div className="logo-text" onClick={() => navigate('/dashboard')} style={{ cursor: 'pointer' }}>
           <h2>MVIT Generator</h2>
           <p>Academic Rigor AI</p>
         </div>
       </div>
 
       {user && (
-        <div className="sidebar-user">
+        <div className="sidebar-user" onClick={() => navigate('/profile')} style={{ cursor: 'pointer' }} title="View Profile">
           <div className="user-avatar">
             {user.firstName?.charAt(0)}{user.lastName?.charAt(0)}
           </div>
@@ -65,6 +69,13 @@ export default function Navbar({ currentPage, setPage }) {
         >
           <Settings size={18} />
           <span>AI Configurations</span>
+        </div>
+        <div 
+          className={`nav-item ${currentPage === 'profile' ? 'active' : ''}`} 
+          onClick={() => navigate('/profile')}
+        >
+          <User size={18} />
+          <span>My Profile</span>
         </div>
       </div>
 

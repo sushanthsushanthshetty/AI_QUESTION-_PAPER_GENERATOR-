@@ -63,6 +63,35 @@ export function AuthProvider({ children }) {
         return false;
       }
 
+      if (data.requires2FA) {
+        return { requires2FA: true, method: data.method, tempToken: data.tempToken };
+      }
+
+      localStorage.setItem('jwtToken', data.token);
+      setUser(data.user);
+      setError(null);
+      return true;
+    } catch (err) {
+      setError('Network error. Please try again.');
+      return false;
+    }
+  };
+
+  const verify2FA = async (tempToken, code) => {
+    setError(null);
+    try {
+      const response = await fetch('/api/auth/verify-2fa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tempToken, code })
+      });
+      const data = await response.json();
+      
+      if (!data.success) {
+        setError(data.error || 'Verification failed');
+        return false;
+      }
+
       localStorage.setItem('jwtToken', data.token);
       setUser(data.user);
       setError(null);
@@ -113,6 +142,7 @@ export function AuthProvider({ children }) {
       isLoading, 
       error, 
       login, 
+      verify2FA,
       signUp, 
       logout, 
       clearError 
