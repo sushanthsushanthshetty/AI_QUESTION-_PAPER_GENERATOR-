@@ -1563,10 +1563,6 @@ const MVITPaperPreview = ({paper: p }) => {
           Approved by HoD{' '}
           <div style={{ fontWeight: 700, fontSize: '7pt', marginTop: '18px', lineHeight: '1.5' }}>
             <div style={{ borderTop: '1px solid #000', display: 'inline-block', width: '100px' }}></div>
-            PROF & HEAD<br />
-            MASTER OF COMPUTER APPLICATIONS<br />
-            M. Visvesvaraya Institute of Technology<br />
-            Hunasamaranahalli, Bangalore-562 157
           </div>
         </div>
       </div>
