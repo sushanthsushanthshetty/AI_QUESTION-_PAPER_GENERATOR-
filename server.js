@@ -6,6 +6,8 @@ import path from 'path';
 import os from 'os';
 import dotenv from 'dotenv';
 import dns from 'dns';
+import multer from 'multer';
+import pdfParse from 'pdf-parse';
 import { connectDB, getDB } from './db/connection.js';
 import { authenticateToken } from './middleware/authenticateToken.js';
 import authRoutes from './routes/authRoutes.js';
@@ -785,6 +787,318 @@ Generate exactly ONE replacement sub-part in raw JSON format. Keep the CO, BL, P
       }
     }
     res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+// Multer setup for syllabus PDF uploads (memory storage, 20MB limit, PDF only)
+const multerStorage = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'), false);
+    }
+  }
+});
+
+// POST /api/syllabus/upload - Extract text and chunk a syllabus PDF
+app.post('/api/syllabus/upload', authenticateToken, multerStorage.single('syllabus'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No PDF file uploaded. Field name must be "syllabus".' });
+    }
+
+    const pdfBuffer = req.file.buffer;
+    let extractedText = '';
+    try {
+      const data = await pdfParse(pdfBuffer);
+      extractedText = data.text || '';
+    } catch (parseErr) {
+      console.error('PDF parse error:', parseErr.message);
+      return res.status(400).json({ success: false, error: 'Failed to parse PDF file.' });
+    }
+
+    if (!extractedText.trim()) {
+      return res.status(400).json({ success: false, error: 'PDF appears to be empty or unreadable.' });
+    }
+
+    // Chunk text by detecting topic-like headers.
+    // Strategy: split on lines that look like standalone headings (short, title-case, no ending punctuation)
+    // and keep following paragraph(s) attached until the next heading.
+    // Also preserve code blocks / OUTPUT sections attached to the preceding explanation.
+    const lines = extractedText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    const chunks = [];
+    let currentTopic = 'General';
+    let currentTextParts = [];
+    let inCodeBlock = false;
+    let codeBlockLines = [];
+
+    const isHeadingLike = (line) => {
+      // Heuristic: relatively short, no ending period/comma/semicolon/colon, not starting with bullet/number, not all-caps sentence
+      if (line.length < 80 && !/[.,;:!?]$/.test(line) && !/^[-•*\d]+[\.\)]\s/.test(line)) {
+        // Additional check: not a continuation of a previous sentence
+        const lower = line.toLowerCase();
+        if (!lower.startsWith('and ') && !lower.startsWith('or ') && !lower.startsWith('but ') && !lower.startsWith('the ') && !lower.startsWith('a ') && !lower.startsWith('an ')) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      // Track fenced code blocks ```
+      if (line.startsWith('```') || line.startsWith('~~~')) {
+        inCodeBlock = !inCodeBlock;
+        codeBlockLines.push(line);
+        if (!inCodeBlock) {
+          // End of code block, attach to current
+          currentTextParts.push(codeBlockLines.join('\n'));
+          codeBlockLines = [];
+        }
+        continue;
+      }
+      if (inCodeBlock) {
+        codeBlockLines.push(line);
+        continue;
+      }
+
+      if (isHeadingLike(line)) {
+        // Save previous chunk if non-empty
+        if (currentTextParts.length > 0) {
+          chunks.push({ topic: currentTopic, text: currentTextParts.join('\n').trim() });
+        }
+        currentTopic = line;
+        currentTextParts = [];
+      } else {
+        currentTextParts.push(line);
+      }
+    }
+
+    // Flush last chunk
+    if (currentTextParts.length > 0) {
+      chunks.push({ topic: currentTopic, text: currentTextParts.join('\n').trim() });
+    }
+
+    // Fallback: if we ended up with a single huge chunk, split by paragraph into ~500-word pseudo-topics
+    if (chunks.length === 1 && chunks[0].text.split(/\s+/).length > 800) {
+      const bigText = chunks[0].text;
+      const paragraphs = bigText.split(/\n\s*\n/).filter(p => p.trim());
+      const newChunks = [];
+      const approxWordsPerChunk = 400;
+      let buffer = [];
+      let wordCount = 0;
+      for (const para of paragraphs) {
+        const wc = para.split(/\s+/).length;
+        if (wordCount + wc > approxWordsPerChunk && buffer.length > 0) {
+          newChunks.push({ topic: currentTopic, text: buffer.join('\n\n').trim() });
+          buffer = [];
+          wordCount = 0;
+        }
+        buffer.push(para);
+        wordCount += wc;
+      }
+      if (buffer.length > 0) {
+        newChunks.push({ topic: currentTopic, text: buffer.join('\n\n').trim() });
+      }
+      chunks.length = 0;
+      chunks.push(...newChunks);
+    }
+
+    res.json({ success: true, chunkCount: chunks.length, chunks });
+  } catch (error) {
+    console.error('Syllabus upload error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to process syllabus PDF.' });
+  }
+});
+
+// POST /api/papers/:id/generate-answers - AI answer key generation from syllabus chunks
+app.post('/api/papers/:id/generate-answers', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { chunks } = req.body;
+
+    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
+      return res.status(400).json({ success: false, error: 'chunks array is required in request body.' });
+    }
+
+    // Load paper with ownership check (mirrors existing PUT /api/papers/:id pattern)
+    let paper = null;
+    try {
+      const db = getDB();
+      const papersCollection = db.collection('papers');
+      const result = await papersCollection.findOne({ paperId: id, teacherId: req.teacherId });
+      if (result) {
+        paper = result;
+      }
+    } catch (dbErr) {
+      // fall through to local JSON
+    }
+
+    if (!paper) {
+      const papers = readPapers();
+      const local = papers.find(p => (p.paperId === id || p.id === id) && p.teacherId === req.teacherId);
+      if (!local) {
+        return res.status(404).json({ success: false, error: 'Paper not found or access denied.' });
+      }
+      paper = local;
+    }
+
+    if (!paper.parts || paper.parts.length === 0) {
+      return res.status(400).json({ success: false, error: 'Paper has no question parts to generate answers for.' });
+    }
+
+    // Build flattened list of subParts with context
+    const subPartTargets = [];
+    (paper.parts || []).forEach((part, pIdx) => {
+      (part.questionSets || []).forEach((qs, sIdx) => {
+        (qs.questions || []).forEach((q, qIdx) => {
+          (q.subParts || []).forEach((sp, spIdx) => {
+            subPartTargets.push({
+              partIdx: pIdx,
+              setIdx: sIdx,
+              qIdx,
+              spIdx,
+              subPart: sp
+            });
+          });
+        });
+      });
+    });
+
+    if (subPartTargets.length === 0) {
+      return res.status(400).json({ success: false, error: 'No sub-parts found in paper.' });
+    }
+
+    // For each subPart, find best-matching chunk by keyword overlap (simple intersection count)
+    const matchChunk = (subPartText) => {
+      const queryWords = new Set(
+        subPartText.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+          .filter(w => w.length > 3)
+      );
+      let bestChunk = chunks[0];
+      let bestScore = -1;
+      for (const chunk of chunks) {
+        const chunkWords = new Set(
+          chunk.text.toLowerCase()
+            .replace(/[^a-z0-9\s]/g, '')
+            .split(/\s+/)
+            .filter(w => w.length > 3)
+        );
+        let overlap = 0;
+        queryWords.forEach(w => { if (chunkWords.has(w)) overlap++; });
+        if (overlap > bestScore) {
+          bestScore = overlap;
+          bestChunk = chunk;
+        }
+      }
+      return bestChunk;
+    };
+
+    const apiKeyToUse = req.body.clientApiKey || process.env.INCEPTION_API_KEY || '';
+    if (!apiKeyToUse) {
+      return res.status(400).json({ success: false, error: 'API Key is missing. Configure INCEPTION_API_KEY in .env or Settings.' });
+    }
+
+    // Generate answers one by one (sequential to keep context clean)
+    let updatedParts = JSON.parse(JSON.stringify(paper.parts));
+    for (const target of subPartTargets) {
+      const sp = target.subPart;
+      const bestChunk = matchChunk(sp.text || '');
+      const chunkText = bestChunk.text || '';
+
+      const systemPrompt = `You are an expert academic answer writer. Given a source text from a syllabus, write a concise, accurate answer for an exam question grounded ONLY in the source text provided.
+
+Output MUST be valid JSON with exactly this shape:
+{
+  "answer": "string — clear, structured answer text"
+}
+
+Rules:
+1. Base the answer ONLY on the provided source text. Do not hallucinate outside information.
+2. Keep the answer length proportional to the marks (roughly 1-2 sentences per mark).
+3. Use bullet points or numbered steps where appropriate.
+4. Do NOT include markdown code fences. Return only raw JSON.`;
+
+      const userPrompt = `SOURCE TEXT:\n${chunkText.substring(0, 4000)}\n\nEXAM QUESTION (${sp.marks || 5} marks):\n${sp.label} ${sp.text || ''}\n\nWrite the answer now as JSON:`;
+
+      try {
+        const response = await axios.post(
+          'https://api.inceptionlabs.ai/v1/chat/completions',
+          {
+            model: 'mercury-2',
+            max_tokens: 1500,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ]
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKeyToUse}`,
+              'Content-Type': 'application/json'
+            },
+            timeout: 60000
+          }
+        );
+
+        let answerText = '';
+        if (response.data.choices && response.data.choices[0] && response.data.choices[0].message) {
+          answerText = response.data.choices[0].message.content || '';
+        } else if (response.data.content && response.data.content[0]) {
+          answerText = response.data.content[0].text || '';
+        } else {
+          answerText = response.data.text || JSON.stringify(response.data);
+        }
+
+        if (!answerText || !answerText.trim()) {
+          throw new Error('Empty AI response for answer generation.');
+        }
+
+        const parsed = repairJSON(answerText);
+        const answer = parsed.answer || parsed[Object.keys(parsed)[0]] || 'Unable to generate answer.';
+
+        // Attach answer to the subPart — do NOT modify label, text, marks, co, bl, po, pi
+        updatedParts[target.partIdx].questionSets[target.setIdx].questions[target.qIdx].subParts[target.spIdx].answer = answer;
+      } catch (aiErr) {
+        console.error(`Answer generation error for subPart ${target.partIdx}-${target.setIdx}-${target.qIdx}-${target.spIdx}:`, aiErr.message);
+        const fallbackAnswer = `Answer generation failed for this sub-part. Please review manually.`;
+        updatedParts[target.partIdx].questionSets[target.setIdx].questions[target.qIdx].subParts[target.spIdx].answer = fallbackAnswer;
+      }
+    }
+
+    const updatedPaper = {
+      ...paper,
+      parts: updatedParts,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Save through existing dual-storage path
+    try {
+      const db = getDB();
+      const papersCollection = db.collection('papers');
+      await papersCollection.replaceOne(
+        { paperId: id, teacherId: req.teacherId },
+        updatedPaper,
+        { upsert: true }
+      );
+    } catch (dbErr) {
+      const papers = readPapers();
+      const idx = papers.findIndex(p => (p.paperId === id || p.id === id) && p.teacherId === req.teacherId);
+      if (idx !== -1) {
+        papers[idx] = updatedPaper;
+        writePapers(papers);
+      }
+    }
+
+    res.json({ success: true, paper: updatedPaper });
+  } catch (error) {
+    console.error('Generate answers error:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to generate answer key.' });
   }
 });
 

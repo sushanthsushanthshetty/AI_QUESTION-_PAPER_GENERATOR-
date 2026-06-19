@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import DashboardPage from './pages/DashboardPage';
+import AnswerKeyPage from './pages/AnswerKeyPage';
 import ProfilePage from './pages/ProfilePage';
 import NotFoundPage from './pages/NotFoundPage';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -28,6 +29,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <ProfilePage />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/answer-key" 
+            element={
+              <ProtectedRoute>
+                <AnswerKeyPage />
               </ProtectedRoute>
             } 
           />

@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { LogOut, User, Settings, BookOpen, History } from 'lucide-react';
+import { LogOut, User, Settings, BookOpen, History, Layers } from 'lucide-react';
 
 export default function Navbar({ currentPage, setPage }) {
   const { user, logout } = useAuth();
@@ -13,7 +13,9 @@ export default function Navbar({ currentPage, setPage }) {
   };
 
   const handleNavClick = (page) => {
-    if (currentPage === 'profile') {
+    if (page === 'answer-key') {
+      navigate('/answer-key');
+    } else if (currentPage === 'profile' || currentPage === 'answer-key') {
       navigate('/dashboard', { state: { defaultPage: page } });
     } else if (setPage) {
       setPage(page);
@@ -62,6 +64,13 @@ export default function Navbar({ currentPage, setPage }) {
         >
           <History size={18} />
           <span>Saved Papers</span>
+        </div>
+        <div 
+          className={`nav-item ${currentPage === 'answer-key' ? 'active' : ''}`} 
+          onClick={() => handleNavClick('answer-key')}
+        >
+          <Layers size={18} />
+          <span>Answer Key</span>
         </div>
         <div 
           className={`nav-item ${currentPage === 'settings' ? 'active' : ''}`} 

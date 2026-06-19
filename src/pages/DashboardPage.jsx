@@ -23,7 +23,8 @@ import {
   ArrowLeft,
   X,
   Copy,
-  Check
+  Check,
+  Upload
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -98,6 +99,10 @@ export default function DashboardPage() {
   const [successMsg, setSuccessMsg] = useState(null);
   const [sections, setSections] = useState([]);
 
+  // PDF Upload states
+  const [uploading, setUploading] = useState(false);
+  const [syllabusChunks, setSyllabusChunks] = useState([]);
+
   // ─── Data helpers ───────────────────────────────────────────────
   useEffect(() => {
     fetchPapers();
@@ -130,6 +135,43 @@ export default function DashboardPage() {
       const data = await response.json();
       if (data.success) setServerApiKeyConfigured(data.apiKeyConfigured);
     } catch (err) { console.error('Error fetching config status:', err); }
+  };
+
+  // PDF upload handler
+  const handleSyllabusPdfUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setAlertMsg('Please select a PDF file.');
+      setTimeout(() => setAlertMsg(null), 5000);
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('syllabus', file);
+      const response = await fetch('/api/syllabus/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwtToken')}` },
+        body: formData
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Upload failed');
+      setSyllabusChunks(data.chunks || []);
+      // Concatenate all chunk texts into syllabus field
+      const combinedText = (data.chunks || [])
+        .map(chunk => `[${chunk.topic}]\n${chunk.text}`)
+        .join('\n\n');
+      setSyllabus(prev => prev ? prev + '\n\n' + combinedText : combinedText);
+      setSuccessMsg(`PDF processed: ${data.chunkCount || 0} topics extracted!`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err) {
+      setAlertMsg(`PDF Upload Error: ${err.message}`);
+      setTimeout(() => setAlertMsg(null), 5000);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   };
 
   const handleSaveApiKey = (key) => {
@@ -788,7 +830,7 @@ return (
           )}
         </div>
         {page === 'editor' && editPaper && (
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
             <button className={`btn ${paperViewMode === 'edit' ? 'btn-accent' : 'btn-outline'}`} onClick={() => setPaperViewMode('edit')}>
               <Edit3 size={16} />
               <span>Edit</span>
@@ -1043,6 +1085,36 @@ return (
               <div className="form-group full-width" style={{ marginTop: '1.25rem' }}>
                 <label>Syllabus Content / Topics Blueprint</label>
                 <textarea rows={4} value={syllabus} onChange={(e) => setSyllabus(e.target.value)} placeholder="Enter course modules, concepts or copy syllabus texts here to train the AI on specific topics..." />
+              </div>
+              {/* PDF Upload UI */}
+              <div className="form-group full-width" style={{ marginTop: '0.75rem', padding: '0.75rem', border: '2px dashed var(--border-color)', borderRadius: '8px', background: 'var(--bg-cream)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                  <Upload size={16} />
+                  <span>Upload Syllabus PDF (optional)</span>
+                </label>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                  Upload a PDF containing the syllabus. The system will extract text and populate the syllabus field above.
+                </p>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={handleSyllabusPdfUpload}
+                    style={{ flex: 1, fontSize: '0.85rem', padding: '0.35rem' }}
+                    disabled={uploading}
+                  />
+                  {uploading && (
+                    <span style={{ fontSize: '0.85rem', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                      Extracting text...
+                    </span>
+                  )}
+                </div>
+                {syllabusChunks.length > 0 && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#22c55e' }} />
+                    {syllabusChunks.length} topic(s) extracted from PDF
+                  </div>
+                )}
               </div>
               <div className="form-group full-width" style={{ marginTop: '0.75rem' }}>
                 <label>CO Statements (optional, for footer)</label>
