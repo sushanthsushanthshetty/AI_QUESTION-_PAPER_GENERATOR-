@@ -1,6 +1,6 @@
 # AI Question Paper Generator
 
-A full-stack web application for generating academic question papers using AI, specifically designed for **MVIT (Sir M. Visvesvaraya Institute of Technology)** faculty. Uses the Inception Labs AI API to generate structured question papers in the MVIT format with Bloom's Taxonomy mapping, CO/PO/PI tracking, and dedicated answer key generation from syllabus PDFs.
+A full-stack web application for generating academic question papers using AI, specifically designed for **MVIT (Sir M. Visvesvaraya Institute of Technology)** faculty. Uses the Inception Labs AI API to generate structured question papers in the MVIT format with Bloom's Taxonomy mapping, CO/PO/PI tracking, syllabus-grounded answer key generation, and a full-featured paper editor.
 
 ---
 
@@ -26,7 +26,7 @@ AI_QUESTION_PAPER_GENRATOR/
 ├── package.json                  # Dependencies & scripts
 ├── index.html                    # Vite entry HTML
 ├── vite.config.js                # Vite configuration
-├── server.js                     # Express backend (1131 lines)
+├── server.js                     # Express backend (1330+ lines)
 ├── eslint.config.js              # ESLint config
 ├── .gitignore
 │
@@ -166,6 +166,7 @@ The main workspace with four sub-views managed by a sidebar navigation:
   - Remember/Understand, Apply/Analyze, Evaluate/Create
   - Interactive SVG pie chart showing cognitive level breakdown
 - **Generate Button** — triggers AI paper generation with immersive loader overlay
+- **Important:** The syllabus text entered at creation time is now **persisted on the paper record** as `syllabusSourceText`, enabling auto-grounding in the Answer Key page
 
 #### b) **Paper Editor** (opens automatically after generation)
 - **Toolbar:** Edit | Preview | Export PDF | Save *(only these four buttons)*
@@ -197,21 +198,38 @@ The main workspace with four sub-views managed by a sidebar navigation:
 
 ### 4. Answer Key Page (`/answer-key`) — Dedicated Answer Key Generator
 
-A standalone page for generating answer keys independently from the paper editor:
+A standalone page for generating answer keys grounded in syllabus source material:
 
-- **Paper Selector:** Dropdown of all saved papers fetched from `GET /api/papers`
-- **Syllabus PDF Upload:** File input accepting `.pdf`, calls `POST /api/syllabus/upload`, shows "X topics extracted" confirmation
-- **Generate Answer Key Button:**
-  - **Disabled until** BOTH a paper is selected AND a PDF has been uploaded (chunks.length > 0)
-  - Shows contextual hint text explaining what's needed
-  - Pre-send guard verifies the chunks array is non-empty before calling `POST /api/papers/:id/generate-answers`
-  - Loading spinner during generation
-  - Success notification with question count
-- **Answer Key Output Display:**
-  - Structured Q&A list grouped by parts
-  - Each sub-part shows: question label, text, marks, and gold-accented answer block
-  - "No answer generated" fallback for unanswered items
-- **Export Answer Key as PDF:** Captures the answer key content as a standalone A4 PDF
+#### New: Auto-loaded Syllabus Source
+- If a paper was created **after** the `syllabusSourceText` feature was implemented, the syllabus content is **automatically loaded** when the paper is selected — no re-upload required
+- A green card displays: *"Using syllabus content from when this paper was created (X characters)"*
+- The "Generate Answer Key" button becomes enabled immediately when source text is available
+
+#### Legacy Upload (Backward Compatible)
+- Papers created **before** this feature show the original PDF upload interface
+- Text: *"This paper was created before syllabus auto-save was available. Please upload the syllabus PDF."*
+- Uploaded PDF is chunked and sent as before
+
+#### Optional Supplemental Upload
+- When syllabus source is auto-loaded, an **optional** "Upload additional reference PDF" control is shown
+- If a supplemental PDF is uploaded, its extracted text is **appended** to the saved source text for that generation run only
+- The saved `syllabusSourceText` field is **never overwritten** by supplemental uploads
+
+#### Generate Answer Key Button
+- **Enabled** whenever ANY source text is available (saved syllabus, uploaded PDF, supplemental PDF, or combination)
+- Shows contextual hints when conditions aren't met
+- Loading spinner during generation
+- Success notification with question count
+
+#### Answer Key Output Display
+- Structured Q&A list grouped by parts
+- Each sub-part shows: question label, text, marks, and answer block
+- **Successful answers** shown in gold-accented blocks
+- **Source-gap answers** (question not found in syllabus) shown in amber/warning style with message: *"This question doesn't appear to be covered in the uploaded syllabus material — you may want to add more source content or revise the question."*
+- Server-side `[ANSWER-KEY SOURCE GAP]` logs with paper ID and question text for coverage analysis
+
+#### Export Answer Key as PDF
+- Captures the answer key content as a standalone A4 PDF
 
 ### 5. Profile Page (`/profile`)
 - View/edit profile fields (name, email, department)
@@ -238,18 +256,24 @@ A standalone page for generating answer keys independently from the paper editor
 3. Backend sends a structured prompt to **Inception Labs AI API**
 4. AI returns paper content as JSON; backend runs it through `repairJSON()` to handle malformed output
 5. If AI fails entirely, a **fallback generator** creates a valid MVIT-format paper using templates
-6. Paper is saved to MongoDB (or local JSON fallback) and opened in the editor
+6. **The raw syllabus text is saved on the paper record** (`syllabusSourceText`) for downstream answer-key grounding
+7. Paper is saved to MongoDB (or local JSON fallback) and opened in the editor
 
 ### Answer Key Generation Flow
 
 1. User navigates to the **Answer Key** page from the sidebar
 2. Selects a saved paper from the dropdown
-3. Uploads the syllabus PDF for reference context
-4. Both conditions met → "Generate Answer Key" button becomes enabled
-5. Backend matches each sub-part question to the most relevant syllabus chunk using keyword overlap scoring
-6. AI generates answers grounded in the source syllabus text
-7. Answers are attached to each sub-part and saved back to the paper
-8. Displayed as structured Q&A on the Answer Key page
+3. **If the paper has `syllabusSourceText`:** the source is auto-loaded with a green indicator — no re-upload needed
+4. **If the paper is older (pre-feature):** user uploads the syllabus PDF manually
+5. Optionally, user can upload a supplemental PDF to add reference material for this generation run
+6. "Generate Answer Key" button enables when ANY source text is available
+7. Backend builds the **combined source text** (saved syllabus + optional supplement)
+8. For each sub-part question, the backend:
+   - **Default path** (≤12k chars): sends the **full source text** as context to the AI
+   - **Fallback path** (>12k chars): selects the top 2-3 most relevant chunks via keyword overlap
+9. AI answers grounded ONLY in the provided source material
+10. If a question isn't covered in the source, a graceful warning message is shown instead of a broken answer
+11. Server logs source coverage gaps for analytics
 
 ### Syllabus PDF Processing Flow
 
@@ -264,7 +288,7 @@ A standalone page for generating answer keys independently from the paper editor
 
 ## Paper Data Structure
 
-Each paper contains MVIT-formatted parts with Bloom's Taxonomy mapping:
+Each paper contains MVIT-formatted parts with Bloom's Taxonomy mapping and syllabus source:
 
 ```json
 {
@@ -278,6 +302,7 @@ Each paper contains MVIT-formatted parts with Bloom's Taxonomy mapping:
   "courseBranch": "MCA",
   "subjectCategory": "PCC",
   "coStatements": [...],
+  "syllabusSourceText": "Module 1: OOP Concepts...",  // Raw syllabus text persisted for answer-key grounding
   "parts": [
     {
       "partNo": 1,
@@ -352,15 +377,15 @@ Each paper contains MVIT-formatted parts with Bloom's Taxonomy mapping:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/generate-paper` | Generate full paper via AI (with JSON repair + fallback) |
+| POST | `/api/generate-paper` | Generate full paper via AI (with JSON repair + fallback). Persists `syllabusSourceText` on the paper. |
 | POST | `/api/regenerate-question` | Regenerate a single sub-part question |
 
 ### Syllabus & Answer Key Routes
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/syllabus/upload` | Upload and parse a syllabus PDF via multer; returns text chunks |
-| POST | `/api/papers/:id/generate-answers` | Generate AI answers for all sub-parts using syllabus chunks as source |
+| POST | `/api/syllabus/upload` | Upload and parse a syllabus PDF via multer; returns text chunks with topic labels |
+| POST | `/api/papers/:id/generate-answers` | **Generate AI answers** for all sub-parts using full-context grounding. Accepts `syllabusSourceText`, `supplementalText`, or legacy `chunks` array. Returns paper with answers attached. |
 
 ---
 
@@ -378,6 +403,9 @@ A robust JSON repair utility that handles malformed AI output:
 ### Dual Storage (MongoDB + Local JSON)
 Every data operation tries MongoDB first, then falls back to local JSON files (`~/.gemini/antigravity/scratch/`). This allows the app to work without a database server.
 
+### Syllabus Source Text Persistence
+When a paper is generated via `POST /api/generate-paper`, the raw syllabus text (from the textarea or uploaded PDF) is saved as `syllabusSourceText` on the paper record. This enables the Answer Key page to auto-load the source and skip requiring a re-upload.
+
 ### Multer PDF Upload (server.js)
 - Memory storage (no disk writes)
 - 20MB file size limit
@@ -390,12 +418,17 @@ PDF text is split by:
 2. **Code block preservation** — fenced code blocks (```) are kept intact
 3. **Paragraph fallback** — single large chunks are split into ~400-word pseudo-topics
 
-### Answer Generation with Source Grounding
+### Answer Generation with Full-Context Grounding
 For each sub-part question, the backend:
-1. Finds the best-matching syllabus chunk using keyword overlap scoring
-2. Sends the chunk text as source context to the AI
-3. The AI generates answers grounded ONLY in the provided source text
-4. Falls back gracefully if AI fails
+
+1. **Builds combined source:** paper's saved `syllabusSourceText` + optional supplemental upload text
+2. **Default strategy** (≤12k chars): sends the **full source text** as context for every question — no chunk picking
+3. **Fallback strategy** (>12k chars): selects the **top 2-3 most relevant chunks** via keyword overlap (not just 1)
+4. Prompts the AI: *"Given this full source material: <text> ... answer this question grounded in the source above"*
+5. If the AI signals `__SOURCE_GAP__` or returns empty, a graceful warning replaces the expected answer
+6. **Graceful failure message:** *"This question doesn't appear to be covered in the uploaded syllabus material — you may want to add more source content or revise the question."*
+7. **Server-side logging:** `[ANSWER-KEY SOURCE GAP]` warnings include the paper ID and question text for easy coverage analysis
+8. Falls back gracefully if AI call fails entirely
 
 ### Zero-Dependency ZIP Generator (authRoutes.js)
 A custom ZIP file compiler written from scratch using only Node.js `Buffer` operations. Used for GDPR-compliant data export.
@@ -465,7 +498,9 @@ npm run preview    # Preview production build
 - **Tests**: Scratch scripts in `scratch/` directory for manual testing
 - **No real email/SMS**: 2FA OTPs are logged to console in development
 - **PDF parsing**: Uses `pdf-parse` for extraction; works best with text-based PDFs (not scanned images)
-- **Answer key quality**: Depends on the uploaded syllabus PDF — better source text produces better answers
+- **Answer key quality**: Depends on the syllabus source — papers created with detailed syllabus text produce the best answers. Papers created before the `syllabusSourceText` feature still work by re-uploading the syllabus PDF
+- **Source gap detection**: Answers that can't be grounded in the syllabus show a distinct warning message and are logged server-side for coverage analysis
+- **Syllabus source text is read-only**: The `syllabusSourceText` field is never overwritten by answer key generation or optional PDF uploads
 
 ---
 

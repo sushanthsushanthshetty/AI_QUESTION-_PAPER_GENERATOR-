@@ -518,6 +518,9 @@ Now generate the complete paper JSON. Each sub-part MUST have its own co, bl, po
     // repairJSON handles all parsing attempts internally and returns a parsed object
     let parsedPaper = repairJSON(paperText);
 
+    // Persist the raw syllabus text on the paper for downstream answer-key grounding
+    parsedPaper.syllabusSourceText = syllabus || '';
+
     parsedPaper.subject         = parsedPaper.subject         || subject;
     parsedPaper.subjectCode     = parsedPaper.subjectCode     || subjectCode;
     parsedPaper.semester        = parsedPaper.semester        || semester;
@@ -681,7 +684,8 @@ function generateFallbackPaper({ subject, subjectCode, semester, testNo, maxMark
     courseBranch: courseBranch || 'MCA',
     subjectCategory: subjectCategory || 'PCC',
     coStatements,
-    parts
+    parts,
+    syllabusSourceText: syllabus || ''
   };
 }
 
@@ -914,43 +918,59 @@ app.post('/api/syllabus/upload', authenticateToken, multerStorage.single('syllab
   }
 });
 
-// POST /api/papers/:id/generate-answers - AI answer key generation from syllabus chunks
+// POST /api/papers/:id/generate-answers - AI answer key generation with full-context grounding
 app.post('/api/papers/:id/generate-answers', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const { chunks } = req.body;
+    const { chunks, syllabusSourceText: clientSourceText, supplementalText } = req.body;
 
-    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
-      return res.status(400).json({ success: false, error: 'chunks array is required in request body.' });
-    }
+    // --- Build the combined source text ---
+    // Priority: 1) Paper's saved syllabusSourceText, 2) client-supplied syllabusSourceText, 3) chunks array
+    let combinedSourceText = '';
 
-    // Load paper with ownership check (mirrors existing PUT /api/papers/:id pattern)
+    // Load paper to check for saved syllabusSourceText
     let paper = null;
     try {
       const db = getDB();
       const papersCollection = db.collection('papers');
       const result = await papersCollection.findOne({ paperId: id, teacherId: req.teacherId });
-      if (result) {
-        paper = result;
-      }
-    } catch (dbErr) {
-      // fall through to local JSON
-    }
+      if (result) paper = result;
+    } catch (dbErr) { /* fall through to local JSON */ }
 
     if (!paper) {
       const papers = readPapers();
-      const local = papers.find(p => (p.paperId === id || p.id === id) && p.teacherId === req.teacherId);
-      if (!local) {
-        return res.status(404).json({ success: false, error: 'Paper not found or access denied.' });
-      }
-      paper = local;
+      paper = papers.find(p => (p.paperId === id || p.id === id) && p.teacherId === req.teacherId);
+    }
+
+    if (!paper) {
+      return res.status(404).json({ success: false, error: 'Paper not found or access denied.' });
     }
 
     if (!paper.parts || paper.parts.length === 0) {
       return res.status(400).json({ success: false, error: 'Paper has no question parts to generate answers for.' });
     }
 
-    // Build flattened list of subParts with context
+    // Build source text from: paper's saved syllabusSourceText, OR client-supplied source, OR chunks
+    if (paper.syllabusSourceText) {
+      combinedSourceText = paper.syllabusSourceText;
+    } else if (clientSourceText) {
+      combinedSourceText = clientSourceText;
+    } else if (chunks && Array.isArray(chunks) && chunks.length > 0) {
+      combinedSourceText = chunks.map(c => c.text || '').join('\n\n');
+    }
+
+    // Append any supplemental (optional PDF upload) text
+    if (supplementalText) {
+      combinedSourceText = combinedSourceText
+        ? combinedSourceText + '\n\n--- Supplemental Reference ---\n\n' + supplementalText
+        : supplementalText;
+    }
+
+    if (!combinedSourceText || !combinedSourceText.trim()) {
+      return res.status(400).json({ success: false, error: 'No source text available. Please ensure syllabus content is available for this paper.' });
+    }
+
+    // --- Build flattened list of subParts with context ---
     const subPartTargets = [];
     (paper.parts || []).forEach((part, pIdx) => {
       (part.questionSets || []).forEach((qs, sIdx) => {
@@ -972,46 +992,74 @@ app.post('/api/papers/:id/generate-answers', authenticateToken, async (req, res)
       return res.status(400).json({ success: false, error: 'No sub-parts found in paper.' });
     }
 
-    // For each subPart, find best-matching chunk by keyword overlap (simple intersection count)
-    const matchChunk = (subPartText) => {
-      const queryWords = new Set(
-        subPartText.toLowerCase()
-          .replace(/[^a-z0-9\s]/g, '')
-          .split(/\s+/)
-          .filter(w => w.length > 3)
-      );
-      let bestChunk = chunks[0];
-      let bestScore = -1;
-      for (const chunk of chunks) {
-        const chunkWords = new Set(
-          chunk.text.toLowerCase()
-            .replace(/[^a-z0-9\s]/g, '')
-            .split(/\s+/)
-            .filter(w => w.length > 3)
-        );
-        let overlap = 0;
-        queryWords.forEach(w => { if (chunkWords.has(w)) overlap++; });
-        if (overlap > bestScore) {
-          bestScore = overlap;
-          bestChunk = chunk;
-        }
-      }
-      return bestChunk;
-    };
-
     const apiKeyToUse = req.body.clientApiKey || process.env.INCEPTION_API_KEY || '';
     if (!apiKeyToUse) {
       return res.status(400).json({ success: false, error: 'API Key is missing. Configure INCEPTION_API_KEY in .env or Settings.' });
     }
 
-    // Generate answers one by one (sequential to keep context clean)
+    // --- Decide grounding strategy ---
+    // Default: send full combined source text to the model for every question
+    // Fallback (text > ~12k chars): use keyword overlap to select top 2-3 most relevant chunks
+    const APPROX_MAX_DIRECT = 12000; // ~12k chars before fallback kicks in
+    let useFullText = combinedSourceText.length <= APPROX_MAX_DIRECT;
+
+    // Pre-split source into chunks for fallback path (splitting by double-newline paragraphs)
+    const sourceChunks = combinedSourceText.split(/\n\s*\n/).filter(c => c.trim().length > 0);
+
+    // Helper: score relevance of a source chunk to a sub-part question
+    const scoreRelevance = (chunkText, questionText) => {
+      const qWords = new Set(
+        questionText.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+          .filter(w => w.length > 3)
+      );
+      const cWords = new Set(
+        chunkText.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+          .filter(w => w.length > 3)
+      );
+      let overlap = 0;
+      qWords.forEach(w => { if (cWords.has(w)) overlap++; });
+      return overlap;
+    };
+
+    // Helper: get top N most relevant chunks for a question
+    const getTopChunks = (questionText, n = 3) => {
+      const scored = sourceChunks.map((chunk, idx) => ({
+        idx,
+        text: chunk,
+        score: scoreRelevance(chunk, questionText)
+      }));
+      scored.sort((a, b) => b.score - a.score);
+      // Take top N, but only those with non-zero score; fall back to first N if all zero
+      const top = scored.filter(s => s.score > 0).slice(0, n);
+      if (top.length === 0) return scored.slice(0, n);
+      return top;
+    };
+
+    // --- Generate answers one by one ---
     let updatedParts = JSON.parse(JSON.stringify(paper.parts));
     for (const target of subPartTargets) {
       const sp = target.subPart;
-      const bestChunk = matchChunk(sp.text || '');
-      const chunkText = bestChunk.text || '';
+      const questionText = `${sp.label} ${sp.text || ''}`;
 
-      const systemPrompt = `You are an expert academic answer writer. Given a source text from a syllabus, write a concise, accurate answer for an exam question grounded ONLY in the source text provided.
+      // Build the source context for this specific question
+      let contextForQuestion = '';
+      if (useFullText) {
+        contextForQuestion = combinedSourceText;
+      } else {
+        // Fallback: top 2-3 most relevant chunks
+        const topChunks = getTopChunks(sp.text || '', 3);
+        contextForQuestion = topChunks.map(c => c.text).join('\n\n---\n\n');
+      }
+
+      if (!contextForQuestion.trim()) {
+        contextForQuestion = combinedSourceText.substring(0, 4000);
+      }
+
+      const systemPrompt = `You are an expert academic answer writer. Given source material from a syllabus, write a concise, accurate answer for an exam question grounded ONLY in the provided source text.
 
 Output MUST be valid JSON with exactly this shape:
 {
@@ -1020,11 +1068,12 @@ Output MUST be valid JSON with exactly this shape:
 
 Rules:
 1. Base the answer ONLY on the provided source text. Do not hallucinate outside information.
-2. Keep the answer length proportional to the marks (roughly 1-2 sentences per mark).
-3. Use bullet points or numbered steps where appropriate.
-4. Do NOT include markdown code fences. Return only raw JSON.`;
+2. If the source text does NOT contain information to answer the question, respond with: {"answer": "__SOURCE_GAP__"}
+3. Keep the answer length proportional to the marks (roughly 1-2 sentences per mark).
+4. Use bullet points or numbered steps where appropriate.
+5. Do NOT include markdown code fences. Return only raw JSON.`;
 
-      const userPrompt = `SOURCE TEXT:\n${chunkText.substring(0, 4000)}\n\nEXAM QUESTION (${sp.marks || 5} marks):\n${sp.label} ${sp.text || ''}\n\nWrite the answer now as JSON:`;
+      const userPrompt = `SOURCE MATERIAL:\n${contextForQuestion.substring(0, 8000)}\n\nEXAM QUESTION (${sp.marks || 5} marks):\n${questionText}\n\nWrite the answer now as JSON. If the source material does not contain the answer, respond with {"answer": "__SOURCE_GAP__"}:`;
 
       try {
         const response = await axios.post(
@@ -1060,14 +1109,23 @@ Rules:
         }
 
         const parsed = repairJSON(answerText);
-        const answer = parsed.answer || parsed[Object.keys(parsed)[0]] || 'Unable to generate answer.';
+        const rawAnswer = parsed.answer || parsed[Object.keys(parsed)[0]] || '';
+
+        // --- Graceful failure: check for source gap signal or empty answer ---
+        let answer = '';
+        if (!rawAnswer || rawAnswer === '__SOURCE_GAP__' || rawAnswer === 'Unable to generate answer.') {
+          answer = "This question doesn't appear to be covered in the uploaded syllabus material — you may want to add more source content or revise the question.";
+          console.warn(`[ANSWER-KEY SOURCE GAP] Paper: ${id} | Question: "${questionText}" | No covering source found in syllabus material.`);
+        } else {
+          answer = rawAnswer;
+        }
 
         // Attach answer to the subPart — do NOT modify label, text, marks, co, bl, po, pi
         updatedParts[target.partIdx].questionSets[target.setIdx].questions[target.qIdx].subParts[target.spIdx].answer = answer;
       } catch (aiErr) {
-        console.error(`Answer generation error for subPart ${target.partIdx}-${target.setIdx}-${target.qIdx}-${target.spIdx}:`, aiErr.message);
-        const fallbackAnswer = `Answer generation failed for this sub-part. Please review manually.`;
-        updatedParts[target.partIdx].questionSets[target.setIdx].questions[target.qIdx].subParts[target.spIdx].answer = fallbackAnswer;
+        console.error(`[ANSWER-KEY ERROR] Paper: ${id} | subPart ${target.partIdx}-${target.setIdx}-${target.qIdx}-${target.spIdx} | Question: "${sp.text || ''}" | Error: ${aiErr.message}`);
+        const gapAnswer = "This question doesn't appear to be covered in the uploaded syllabus material — you may want to add more source content or revise the question.";
+        updatedParts[target.partIdx].questionSets[target.setIdx].questions[target.qIdx].subParts[target.spIdx].answer = gapAnswer;
       }
     }
 

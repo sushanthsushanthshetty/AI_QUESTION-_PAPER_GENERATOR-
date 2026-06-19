@@ -22,9 +22,15 @@ export default function AnswerKeyPage() {
   const [savedPapers, setSavedPapers] = useState([]);
   const [selectedPaper, setSelectedPaper] = useState(null);
 
-  // PDF upload
+  // Syllabus source state
+  const [syllabusSourceText, setSyllabusSourceText] = useState('');   // auto-loaded from paper
+  const [supplementalText, setSupplementalText] = useState('');       // extra PDF upload text
+  const [supplementFileName, setSupplementFileName] = useState('');
+
+  // PDF upload (legacy for old papers w/o syllabusSourceText)
   const [uploading, setUploading] = useState(false);
   const [syllabusChunks, setSyllabusChunks] = useState([]);
+  const [supplementUploading, setSupplementUploading] = useState(false);
 
   // Answer generation
   const [generating, setGenerating] = useState(false);
@@ -46,6 +52,20 @@ export default function AnswerKeyPage() {
     }
   };
 
+  // When a paper is selected, auto-load syllabusSourceText if present
+  useEffect(() => {
+    if (selectedPaper && selectedPaper.syllabusSourceText) {
+      setSyllabusSourceText(selectedPaper.syllabusSourceText);
+    } else if (selectedPaper) {
+      setSyllabusSourceText('');
+    }
+    // Reset supplemental materials and old chunks when paper changes
+    setSupplementalText('');
+    setSupplementFileName('');
+    setSyllabusChunks([]);
+    setGeneratedPaper(null);
+  }, [selectedPaper]);
+
   const handlePdfUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -65,8 +85,19 @@ export default function AnswerKeyPage() {
       });
       const data = await response.json();
       if (!data.success) throw new Error(data.error || 'Upload failed');
-      setSyllabusChunks(data.chunks || []);
-      setSuccessMsg(`PDF processed: ${data.chunkCount || 0} topics extracted!`);
+      // For papers WITHOUT syllabusSourceText (old papers): use chunks as before
+      if (!syllabusSourceText) {
+        setSyllabusChunks(data.chunks || []);
+        setSuccessMsg(`PDF processed: ${data.chunkCount || 0} topics extracted!`);
+      } else {
+        // For papers WITH syllabusSourceText: this is a supplemental upload — extract full text
+        const combinedSupplement = (data.chunks || [])
+          .map(c => `[${c.topic}]\n${c.text}`)
+          .join('\n\n');
+        setSupplementalText(combinedSupplement);
+        setSupplementFileName(file.name);
+        setSuccessMsg(`Supplemental PDF "${file.name}" processed and appended to syllabus source.`);
+      }
       setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err) {
       setAlertMsg(`PDF Upload Error: ${err.message}`);
@@ -77,9 +108,44 @@ export default function AnswerKeyPage() {
     }
   };
 
+  // "Upload additional reference" — works like a supplement when syllabusSourceText is already loaded
+  const handleSupplementUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      setAlertMsg('Please select a PDF file.');
+      setTimeout(() => setAlertMsg(null), 5000);
+      return;
+    }
+    setSupplementUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('syllabus', file);
+      const response = await fetch('/api/syllabus/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('jwtToken')}` },
+        body: formData
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Upload failed');
+      const combinedSupplement = (data.chunks || [])
+        .map(c => `[${c.topic}]\n${c.text}`)
+        .join('\n\n');
+      setSupplementalText(combinedSupplement);
+      setSupplementFileName(file.name);
+      setSuccessMsg(`Additional reference "${file.name}" appended for this generation run.`);
+      setTimeout(() => setSuccessMsg(null), 5000);
+    } catch (err) {
+      setAlertMsg(`Upload Error: ${err.message}`);
+      setTimeout(() => setAlertMsg(null), 5000);
+    } finally {
+      setSupplementUploading(false);
+      e.target.value = '';
+    }
+  };
+
   const handleGenerate = async () => {
     if (!selectedPaper) return;
-    if (!syllabusChunks || syllabusChunks.length === 0) return;
 
     const paperId = selectedPaper.paperId || selectedPaper.id;
     if (!paperId) {
@@ -88,9 +154,10 @@ export default function AnswerKeyPage() {
       return;
     }
 
-    // Verify chunks are non-empty before sending
-    if (!Array.isArray(syllabusChunks) || syllabusChunks.length === 0) {
-      setAlertMsg('No syllabus chunks available. Please upload a PDF first.');
+    // Verify source text is available (either syllabusSourceText, chunks, or supplemental)
+    const hasSource = !!(syllabusSourceText || (syllabusChunks && syllabusChunks.length > 0) || supplementalText);
+    if (!hasSource) {
+      setAlertMsg('No syllabus source available. Please ensure the paper was created with syllabus content or upload a PDF.');
       setTimeout(() => setAlertMsg(null), 5000);
       return;
     }
@@ -98,13 +165,26 @@ export default function AnswerKeyPage() {
     setGenerating(true);
     try {
       const requestBody = {
-        chunks: syllabusChunks,
         clientApiKey: localStorage.getItem('inception_api_key') || ''
       };
-      // Sanity-check: the chunks array must not be empty at send time
-      if (!requestBody.chunks || requestBody.chunks.length === 0) {
-        throw new Error('Chunks array is empty — aborting to prevent "no source text" failure.');
+
+      // Send the source text in the format the API expects
+      if (syllabusSourceText || supplementalText) {
+        // New path: send syllabusSourceText + optional supplementalText
+        requestBody.syllabusSourceText = syllabusSourceText || '';
+        if (supplementalText) {
+          requestBody.supplementalText = supplementalText;
+        }
+      } else {
+        // Legacy path: send chunks for old papers
+        requestBody.chunks = syllabusChunks;
       }
+
+      // Sanity-check
+      if (!requestBody.syllabusSourceText && !requestBody.chunks) {
+        throw new Error('No source text available — aborting.');
+      }
+
       const response = await fetch(`/api/papers/${paperId}/generate-answers`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -113,7 +193,8 @@ export default function AnswerKeyPage() {
       const data = await response.json();
       if (!data.success) throw new Error(data.error || 'Answer generation failed');
       setGeneratedPaper(data.paper);
-      setSuccessMsg(`Answer key generated for ${data.paper.parts?.reduce((s, p) => s + (p.questionSets?.length || 0), 0) || 0} questions!`);
+      const qCount = data.paper.parts?.reduce((s, p) => s + (p.questionSets?.length || 0), 0) || 0;
+      setSuccessMsg(`Answer key generated for ${qCount} questions!`);
       setTimeout(() => setSuccessMsg(null), 5000);
     } catch (err) {
       setAlertMsg(`Answer Generation Error: ${err.message}`);
@@ -169,7 +250,12 @@ export default function AnswerKeyPage() {
   };
 
   // Determine if the Generate button should be enabled
-  const canGenerate = selectedPaper && syllabusChunks.length > 0 && !generating;
+  const hasAnySource = !!(
+    syllabusSourceText ||
+    (syllabusChunks && syllabusChunks.length > 0) ||
+    supplementalText
+  );
+  const canGenerate = selectedPaper && hasAnySource && !generating;
 
   // The paper to display answers from
   const displayPaper = generatedPaper || selectedPaper;
@@ -246,50 +332,102 @@ export default function AnswerKeyPage() {
                 <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   <FileText size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
                   {selectedPaper.subject} — Semester {selectedPaper.semester} — {selectedPaper.parts?.length || 0} part(s), {selectedPaper.parts?.reduce((s, p) => s + (p.questionSets?.length || 0), 0) || 0} question set(s)
+                  {selectedPaper.syllabusSourceText && (
+                    <span style={{ display: 'block', marginTop: '0.25rem', color: '#22c55e', fontWeight: 600 }}>
+                      <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                      Syllabus source saved with this paper
+                    </span>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* PDF Upload */}
-            <div className="glass-card">
-              <h3 style={{ fontSize: '1.2rem', marginBottom: '1.25rem', color: 'var(--primary-navy)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Upload size={18} />
-                <span>2. Upload Syllabus PDF</span>
-              </h3>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
-                Upload the syllabus PDF for this paper. The system will extract reference text for answer generation.
-              </p>
-              <div style={{ border: '2px dashed var(--border-color)', borderRadius: '8px', padding: '1rem', background: 'var(--bg-cream)' }}>
-                <input
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  onChange={handlePdfUpload}
-                  style={{ width: '100%', fontSize: '0.85rem', padding: '0.35rem' }}
-                  disabled={uploading}
-                />
-                {uploading && (
-                  <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-gold)', fontWeight: 600 }}>
-                    Extracting text from PDF...
+            {/* Source Section: shows auto-loaded syllabus OR upload prompt */}
+            {selectedPaper && syllabusSourceText ? (
+              <>
+                {/* Auto-loaded syllabus source indicator */}
+                <div className="glass-card" style={{ borderColor: '#22c55e', backgroundColor: '#f0fdf4' }}>
+                  <h3 style={{ fontSize: '1.2rem', marginBottom: '1.25rem', color: 'var(--primary-navy)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <CheckCircle size={18} color="#22c55e" />
+                    <span>2. Syllabus Source Ready</span>
+                  </h3>
+                  <p style={{ fontSize: '0.85rem', color: '#166534', marginBottom: '0.75rem' }}>
+                    Using syllabus content from when this paper was created ({syllabusSourceText.length} characters).
+                  </p>
+
+                  {/* Optional supplemental upload */}
+                  <div style={{ border: '2px dashed var(--border-color)', borderRadius: '8px', padding: '1rem', background: 'var(--bg-cream)' }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+                      <Upload size={14} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                      <strong>Optional:</strong> Upload an additional reference PDF to supplement the saved syllabus (appended for this run only).
+                    </p>
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      onChange={handleSupplementUpload}
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.35rem' }}
+                      disabled={supplementUploading}
+                    />
+                    {supplementUploading && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                        Extracting text from supplemental PDF...
+                      </div>
+                    )}
+                    {supplementFileName && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: '#166534' }}>
+                        <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#22c55e' }} />
+                        Supplement: "{supplementFileName}" ({supplementalText.length} chars appended)
+                      </div>
+                    )}
                   </div>
-                )}
-                {syllabusChunks.length > 0 && (
-                  <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                    <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#22c55e' }} />
-                    {syllabusChunks.length} topic(s) extracted from PDF
+                </div>
+              </>
+            ) : selectedPaper && !syllabusSourceText ? (
+              <>
+                {/* Legacy PDF upload for papers without saved syllabusSourceText */}
+                <div className="glass-card">
+                  <h3 style={{ fontSize: '1.2rem', marginBottom: '1.25rem', color: 'var(--primary-navy)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Upload size={18} />
+                    <span>2. Upload Syllabus PDF</span>
+                  </h3>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                    This paper was created before syllabus auto-save was available. Please upload the syllabus PDF for answer generation.
+                  </p>
+                  <div style={{ border: '2px dashed var(--border-color)', borderRadius: '8px', padding: '1rem', background: 'var(--bg-cream)' }}>
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      onChange={handlePdfUpload}
+                      style={{ width: '100%', fontSize: '0.85rem', padding: '0.35rem' }}
+                      disabled={uploading}
+                    />
+                    {uploading && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                        Extracting text from PDF...
+                      </div>
+                    )}
+                    {syllabusChunks.length > 0 && (
+                      <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        <CheckCircle size={14} style={{ verticalAlign: 'middle', marginRight: '4px', color: '#22c55e' }} />
+                        {syllabusChunks.length} topic(s) extracted from PDF
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
+              </>
+            ) : null}
 
             {/* Generate Button */}
             <div className="glass-card" style={{ background: 'var(--primary-navy)', color: 'var(--text-light)', border: 'none', textAlign: 'center' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--accent-gold)', marginBottom: '0.5rem' }}>3. Generate Answer Key</h3>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--accent-gold)', marginBottom: '0.5rem' }}>
+                {selectedPaper && syllabusSourceText ? '3. Generate Answer Key' : '3. Generate Answer Key'}
+              </h3>
               {!canGenerate && (
                 <p style={{ fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)', marginBottom: '1rem' }}>
                   {!selectedPaper
-                    ? 'Select a paper and upload a syllabus PDF to continue.'
-                    : syllabusChunks.length === 0
-                      ? 'Upload a syllabus PDF above to continue.'
+                    ? 'Select a paper and ensure syllabus content is available to continue.'
+                    : !hasAnySource
+                      ? 'No syllabus source available. Please ensure the paper was created with syllabus content or upload a PDF.'
                       : ''}
                 </p>
               )}
@@ -335,7 +473,7 @@ export default function AnswerKeyPage() {
               {!generatedPaper ? (
                 <div style={{ textAlign: 'center', padding: '3rem 1.5rem', color: 'var(--text-muted)' }}>
                   <Layers size={48} style={{ strokeWidth: 1, marginBottom: '1rem', color: 'var(--border-color)' }} />
-                  <p>Select a paper, upload a syllabus PDF, and generate the answer key to see results here.</p>
+                  <p>Select a paper, ensure syllabus content is available, and generate the answer key to see results here.</p>
                 </div>
               ) : (
                 <div id="answer-key-export-content" style={{ textAlign: 'left' }}>
@@ -370,7 +508,17 @@ export default function AnswerKeyPage() {
                                   whiteSpace: 'pre-wrap'
                                 }}>
                                   <span style={{ fontWeight: 600, color: 'var(--accent-gold)' }}>Answer: </span>
-                                  {sp.answer || <em style={{ color: '#adb5bd' }}>No answer generated.</em>}
+                                  {sp.answer ? (
+                                    sp.answer.startsWith("This question doesn't appear to be covered") ? (
+                                      <span style={{ color: '#d97706', backgroundColor: '#fffbeb', padding: '0.25rem 0.5rem', borderRadius: '4px', display: 'inline-block' }}>
+                                        ⚠️ {sp.answer}
+                                      </span>
+                                    ) : (
+                                      sp.answer
+                                    )
+                                  ) : (
+                                    <em style={{ color: '#adb5bd' }}>No answer generated.</em>
+                                  )}
                                 </div>
                               </div>
                             ))}
