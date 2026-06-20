@@ -1300,6 +1300,14 @@ const cellStyle = {
 };
 const cellQ = {...cellStyle, textAlign:'left', verticalAlign:'top' };
 
+// Helper: detect if question text contains embedded code (heuristic)
+const isCodeText = (text) => {
+  if (!text) return false;
+  const hasNewlines = text.includes('\n');
+  const hasCodeSymbols = /[{}\[\];]/.test(text);
+  return hasNewlines && hasCodeSymbols;
+};
+
 const MVITPaperPreview = ({paper: p }) => {
   const br   = p.courseBranch    || 'MCA';
   const sc   = p.subjectCode    || '';
@@ -1565,7 +1573,12 @@ const MVITPaperPreview = ({paper: p }) => {
                               {q.qNo || (partIdx * 2 + setIdx + 1)}
                             </td>
                           ) : null}
-                          <td style={{ ...cellQ, paddingLeft: '8px', paddingBottom: !isLastSub ? '6px' : undefined }}>
+                          <td style={{
+                            ...cellQ,
+                            paddingLeft: '8px',
+                            paddingBottom: !isLastSub ? '6px' : undefined,
+                            ...(isCodeText(sp.text) ? { fontFamily: 'monospace', fontSize: '7.5pt', whiteSpace: 'pre-wrap', wordBreak: 'break-word' } : {})
+                          }}>
                             <span style={{ fontWeight: 600 }}>{sp.label}</span> {sp.text || ''}
                           </td>
                           <td style={{ ...cellStyle, fontWeight: 700, textAlign: 'center' }}>{sp.marks || ''}</td>

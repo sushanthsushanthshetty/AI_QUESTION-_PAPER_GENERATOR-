@@ -453,6 +453,37 @@ You MUST generate a COMPLETE question paper in this exact JSON structure. Every 
   ]
 }
 
+GROUNDING & QUALITY RULES — READ CAREFULLY:
+A. Strict grounding: Generate every question using ONLY the concepts, terminology, and examples explicitly present in the syllabus content provided below. Do not introduce sub-topics, applications, comparisons, or examples that are not directly covered in this text, even if they are commonly associated with the subject.
+B. Self-check before finalizing: Before finalizing each question, verify that it can be answered using only the syllabus content provided. If a question would require information beyond this content, revise it to focus on a sub-topic that IS explicitly covered, or simplify it until it is directly answerable from the source text.
+C. Question type and scope, calibrated to Bloom's level:
+Each question must target EXACTLY ONE concept from the syllabus content — never combine multiple distinct concepts, definitions, or comparisons into a single question or sub-part, regardless of the marks assigned. If more depth is needed to justify higher marks, ask for MORE DEPTH on the same single concept (e.g. a more detailed explanation, a more thorough example, edge cases) — never add additional concepts to reach the mark value.
+
+
+Question type mix — aim for a natural balance across the paper, similar to a real programming-course exam:
+- Roughly half the questions should be descriptive/explanatory (using verbs like Explain, Describe, Define, Differentiate, Discuss, Illustrate, Write a short note on).
+- The other half may legitimately be programming-oriented: "Predict/trace the output of the following program," or "Write a [class/method] that does X." These are NOT a rare exception — they are a standard, expected question type for a programming subject, and should appear regularly, not just once per paper.
+- Still apply the one-concept-per-question rule to these: a code-output question should test ONE behavior/concept (e.g. one override, one method call chain), not multiple unrelated concepts in one snippet.
+
+CODE FORMATTING — whenever a question includes a code snippet, it MUST be written as a properly structured, multi-line program, exactly as it would appear in an IDE: each statement on its own line, opening/closing braces placed conventionally, consistent indentation (use literal newline characters in the JSON string, not a single run-on line). Example of CORRECT formatting:
+
+class Animal {
+    void sound() {
+        System.out.println("Animal makes a sound");
+    }
+}
+class Dog extends Animal {
+    @Override
+    void sound() {
+        System.out.println("Dog barks");
+    }
+}
+
+Do NOT write code as a single inline sentence like: "class Animal { void sound() { System.out.println(...); } } class Dog extends Animal { ... }" — this is the WRONG format and must never be produced.
+
+Additionally, never include the words "syllabus," "as shown in the syllabus," "as described in the syllabus," or any other meta-reference to source material inside the generated question text. Questions must read as fully self-contained exam questions written by a faculty member from scratch — the syllabus is your reference for content, never something the question itself should mention.
+D. Bloom's level calibration without complexity inflation: Match each question to its assigned Bloom's Taxonomy level (Remember/Understand, Apply/Analyze, Evaluate/Create) through WHAT is being asked (recall vs. application vs. critical evaluation), not through how complicated the sentence is. Higher Bloom's levels should require deeper thinking, not harder-to-parse wording.
+
 RULES:
 1. Generate exactly ${partsCount} PARTS (PART A, PART B, ...).
 2. Each part has exactly ${qtyPerPart} question SETS (Set 1 and Set 2). Set 1 and Set 2 are OR alternatives.
@@ -461,7 +492,7 @@ RULES:
 5. Total marks per part: Part A ~${partAMarks} marks, Part B ~${partBMarks} marks.
 6. Sum of one question set per part = ${maxMarks} total.
 7. coStatements must describe what students achieve for each CO based on the syllabus topic.
-8. Use meaningful question text related to the syllabus. Be specific - include technical terms, concepts, and ask students to explain, describe, analyze, calculate, draw, etc.
+8. Use meaningful question text related to the syllabus. Be specific — include technical terms, concepts, and ask students to explain, describe, analyze, calculate, draw, etc.
 9. DO NOT wrap in markdown code fences. Return ONLY the raw JSON object.`;
 
     const userPrompt = `Generate a ${testNo} question paper for ${subject} (${subjectCode}).

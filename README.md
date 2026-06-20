@@ -275,6 +275,49 @@ A standalone page for generating answer keys grounded in syllabus source materia
 10. If a question isn't covered in the source, a graceful warning message is shown instead of a broken answer
 11. Server logs source coverage gaps for analytics
 
+### Paper Generation — Grounding & Quality Rules (Prompt Injection)
+
+Starting from the May 2026 revision, the system prompt sent to mercury-2 via `POST /api/generate-paper` includes a dedicated **GROUNDING & QUALITY RULES** section with four instructions designed to make questions more tightly coupled to the syllabus and easier for students to answer:
+
+**A. Strict grounding:**  
+Generate every question using ONLY the concepts, terminology, and examples explicitly present in the syllabus content provided. Do not introduce sub-topics, applications, comparisons, or examples that are not directly covered in this text, even if they are commonly associated with the subject.
+
+**B. Self-check before finalizing:**  
+Before finalizing each question, verify that it can be answered using only the syllabus content provided. If a question would require information beyond this content, revise it to focus on a sub-topic that IS explicitly covered, or simplify it until it is directly answerable from the source text.
+
+**C. Simpler phrasing:**  
+Write each question in clear, direct academic language appropriate for the semester level. Avoid unnecessarily complex sentence structure, compound multi-part phrasing, or advanced vocabulary not used in the source text. A question should read as a single, focused ask — not a bundle of sub-questions stitched together — unless the marks/Bloom level explicitly calls for a multi-part answer.
+
+**D. Bloom's level calibration without complexity inflation:**  
+Match each question to its assigned Bloom's Taxonomy level (Remember/Understand, Apply/Analyze, Evaluate/Create) through WHAT is being asked (recall vs. application vs. critical evaluation), not through how complicated the sentence is. Higher Bloom's levels should require deeper thinking, not harder-to-parse wording.
+
+These rules are inserted into the system prompt right after the JSON schema example and before the existing structural RULES (part count, marks distribution, CO/PO/PI assignment). The full system prompt now reads:
+
+```
+You are an expert academic evaluator and question paper generator for MVIT
+(Sir M. Visvesvaraya Institute of Technology). You ONLY return valid JSON.
+No other text.
+
+You MUST generate a COMPLETE question paper in this exact JSON structure.
+Every field is required.
+
+{ ... JSON schema ... }
+
+GROUNDING & QUALITY RULES — READ CAREFULLY:
+A. Strict grounding: ...
+B. Self-check before finalizing: ...
+C. Simpler phrasing: ...
+D. Bloom's level calibration without complexity inflation: ...
+
+RULES:
+1. Generate exactly ${partsCount} PARTS ...
+2. Each part has exactly ${qtyPerPart} question SETS ...
+3. ...
+9. DO NOT wrap in markdown code fences. Return ONLY the raw JSON object.
+```
+
+No changes were made to the JSON schema, structural rules, marks logic, CO/PO/PI assignment, `repairJSON()`, the fallback template generator, the Paper Editor, or the Answer Key page. Only the text of the system prompt was edited.
+
 ### Syllabus PDF Processing Flow
 
 1. User uploads a PDF file via the file input
